@@ -14,14 +14,16 @@ import {
   formatUnits,
   http,
   isAddress,
+  parseAbiItem,
   parseUnits,
 } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
+import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
 import { avalanche, avalancheFuji } from 'viem/chains';
 import { ConfigurationService } from '../configuration/configuration.service';
 import { SettlementAsset } from '../configuration/configuration.types';
 import {
   NativeTreasuryBalance,
+  IncomingErc20Transfer,
   TransactionReconciliation,
   TransferExecution,
   TreasuryBalance,
@@ -48,6 +50,24 @@ export class BlockchainService {
       chain: this.chain,
       transport: http(this.configuration.networkSummary.rpcUrl),
     });
+  }
+
+  getLatestBlockNumber(): Promise<bigint> {
+    return this.publicClient.getBlockNumber();
+  }
+
+  derivePayInAddress(index: number): Address {
+    const mnemonic = this.configuration.payInMnemonic;
+    if (!mnemonic) {
+      throw new ServiceUnavailableException(
+        'AvaSettle pay-in mnemonic is not configured.',
+      );
+    }
+
+    return mnemonicToAccount(mnemonic, {
+      accountIndex: this.configuration.payInDerivationAccount,
+      addressIndex: index,
+    }).address;
   }
 
   toAtomicAmount(asset: SettlementAsset, amount: string): bigint {
@@ -110,6 +130,62 @@ export class BlockchainService {
       balanceAtomic: balance.toString(),
       balance: formatUnits(balance, assetConfig.decimals),
     };
+  }
+
+  async getAssetBalanceForAddress(input: {
+    asset: SettlementAsset;
+    address: Address;
+  }): Promise<TreasuryBalance> {
+    const assetConfig = this.requireAsset(input.asset);
+    const balance = await this.publicClient.readContract({
+      address: assetConfig.address,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [input.address],
+    });
+
+    return {
+      asset: input.asset,
+      tokenAddress: assetConfig.address,
+      decimals: assetConfig.decimals,
+      balanceAtomic: balance.toString(),
+      balance: formatUnits(balance, assetConfig.decimals),
+    };
+  }
+
+  async findIncomingErc20Transfers(input: {
+    asset: SettlementAsset;
+    to: Address;
+    fromBlock: bigint;
+  }): Promise<IncomingErc20Transfer[]> {
+    const assetConfig = this.requireAsset(input.asset);
+    const latestBlock = await this.publicClient.getBlockNumber();
+    const configuredFromBlock =
+      input.fromBlock > 0n
+        ? input.fromBlock
+        : latestBlock - this.configuration.payInLookbackBlocks;
+    const fromBlock = configuredFromBlock > 0n ? configuredFromBlock : 0n;
+    const transferEvent = parseAbiItem(
+      'event Transfer(address indexed from, address indexed to, uint256 value)',
+    );
+    const logs = await this.publicClient.getLogs({
+      address: assetConfig.address,
+      event: transferEvent,
+      args: {
+        to: input.to,
+      },
+      fromBlock,
+      toBlock: 'latest',
+    });
+
+    return logs.map((log) => ({
+      hash: log.transactionHash,
+      from: log.args.from as `0x${string}`,
+      to: log.args.to as `0x${string}`,
+      amountAtomic: (log.args.value ?? 0n).toString(),
+      amount: formatUnits(log.args.value ?? 0n, assetConfig.decimals),
+      blockNumber: log.blockNumber.toString(),
+    }));
   }
 
   async sendErc20Transfer(input: {

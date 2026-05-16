@@ -7,6 +7,13 @@ import { ConfigurationModule } from './configuration/configuration.module';
 import { HealthModule } from './health/health.module';
 import { PayoutsModule } from './payouts/payouts.module';
 import { TreasuryModule } from './treasury/treasury.module';
+import { StorageModule } from './storage/storage.module';
+import { ChainFlowModule } from './chain-flow/chain-flow.module';
+import { PayinsModule } from './payins/payins.module';
+import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { ReportsModule } from './reports/reports.module';
+import { SettlementModule } from './settlement/settlement.module';
+import { RiskModule } from './risk/risk.module';
 
 @Module({
   imports: [
@@ -16,6 +23,13 @@ import { TreasuryModule } from './treasury/treasury.module';
     AuditModule,
     PayoutsModule,
     TreasuryModule,
+    StorageModule,
+    ChainFlowModule,
+    PayinsModule,
+    ReconciliationModule,
+    ReportsModule,
+    SettlementModule,
+    RiskModule,
   ],
   controllers: [AppController],
   providers: [AppService],

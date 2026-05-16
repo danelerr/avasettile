@@ -1,0 +1,752 @@
+diff --git a/.env.example b/.env.example
+index 9e36a12..aff9711 100644
+--- a/.env.example
++++ b/.env.example
+@@ -10,10 +10,19 @@ AVASETTLE_API_KEY=change-me
+ AVASETTLE_NETWORK=avalanche-fuji
+ AVASETTLE_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
+ 
++# Local JSON persistence used by the hackathon backend.
++AVASETTLE_STORAGE_FILE=data/avasettle-ledger.json
++
+ # Treasury signer used to broadcast ERC-20 payouts.
+ # Never commit a real key. Use a dedicated hot wallet with limited balances.
+ AVASETTLE_TREASURY_PRIVATE_KEY=
+ 
++# Pay-in address derivation. Required for POST /v1/payins.
++# Use a dedicated deposit mnemonic. Do not reuse the treasury signer seed.
++AVASETTLE_PAYIN_MNEMONIC=
++AVASETTLE_PAYIN_DERIVATION_ACCOUNT=0
++AVASETTLE_PAYIN_LOOKBACK_BLOCKS=50000
++
+ # Comma-separated enabled assets. Current module supports ERC-20 USDC and USDT.
+ AVASETTLE_ENABLED_ASSETS=USDC
+ 
+@@ -30,3 +39,11 @@ AVASETTLE_MAX_PAYOUT_USDT=1000
+ AVASETTLE_MIN_CONFIRMATIONS=2
+ AVASETTLE_WAIT_FOR_RECEIPT=false
+ AVASETTLE_CORS_ORIGINS=*
++
++# Mock risk model thresholds. Replace the service behind RiskService with Wavy Node later.
++AVASETTLE_RISK_REVIEW_AMOUNT=10000
++AVASETTLE_RISK_REJECT_AMOUNT=50000
++
++# Simulated fiat settlement controls.
++AVASETTLE_SETTLEMENT_FIAT_CURRENCY=USD
++AVASETTLE_SETTLEMENT_FIAT_RATE=1
+diff --git a/.gitignore b/.gitignore
+index af45a21..f0f9a57 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,5 +1,6 @@
+ node_modules
+ dist
++data
+ .env
+ .env.*
+ !.env.example
+diff --git a/README.md b/README.md
+index 558f06e..e837160 100644
+--- a/README.md
++++ b/README.md
+@@ -9,11 +9,14 @@ This service is intentionally isolated from the existing Parmelia Worker and is
+ - Validates B2B calls with `x-avasettle-api-key` or `Authorization: Bearer`.
+ - Prepares idempotent payout intents from Chain Flow.
+ - Authorizes and broadcasts ERC-20 treasury transfers with `viem`.
++- Creates real EVM pay-in deposit addresses from a configured mnemonic.
++- Scans ERC-20 `Transfer` logs to reconcile pay-ins.
+ - Reconciles transaction receipts and confirmation depth.
+ - Exposes treasury status and balances.
+-- Records an in-memory audit trail behind a repository boundary.
++- Records a JSON-file ledger and audit trail behind a repository boundary.
++- Provides reports, mock risk scoring, and simulated fiat settlement.
+ 
+-The current ledger is in memory so the hackathon backend is easy to run. The `PayoutLedgerService` is the replacement point for Postgres, D1, DynamoDB or another durable ledger.
++The current ledger persists to `AVASETTLE_STORAGE_FILE`, defaulting to `data/avasettle-ledger.json`. This is intentionally simple for the hackathon; `StorageService`, `PayoutLedgerService`, and `PayInLedgerService` are the replacement points for Postgres, D1, DynamoDB or another durable ledger.
+ 
+ ## Foundry And Smart Contracts
+ 
+@@ -52,15 +55,21 @@ PORT=3001
+ AVASETTLE_API_KEY=change-me
+ AVASETTLE_NETWORK=avalanche-fuji
+ AVASETTLE_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
++AVASETTLE_STORAGE_FILE=data/avasettle-ledger.json
+ AVASETTLE_TREASURY_PRIVATE_KEY=0x...
++AVASETTLE_PAYIN_MNEMONIC=
+ AVASETTLE_ENABLED_ASSETS=USDC
+ AVASETTLE_USDC_ADDRESS=0x...
+ AVASETTLE_USDC_DECIMALS=6
+ AVASETTLE_MAX_PAYOUT_USDC=1000
++AVASETTLE_SETTLEMENT_FIAT_CURRENCY=USD
++AVASETTLE_SETTLEMENT_FIAT_RATE=1
+ ```
+ 
+ Do not rely on default token addresses for production. Configure the exact stablecoin contract used by the institution and selected Avalanche network.
+ 
++Do not configure pay-ins with a throwaway mnemonic in production. `AVASETTLE_PAYIN_MNEMONIC` derives real EVM addresses, so it controls funds received at those addresses.
++
+ ## Swagger / OpenAPI
+ 
+ The API is documented with the official NestJS OpenAPI integration using `@nestjs/swagger`, `DocumentBuilder`, and `SwaggerModule`.
+@@ -85,7 +94,7 @@ Use one of the available security schemes in Swagger:
+ 
+ ## API Contract For Chain Flow
+ 
+-All `/v1/*` endpoints require the API key.
++All `/v1/*` and `/api/*` endpoints require the API key, except public health/metadata endpoints.
+ 
+ Common headers:
+ 
+@@ -119,6 +128,7 @@ It checks whether AvaSettle is operationally ready to process payouts:
+ 
+ - API key configured.
+ - Treasury private key configured.
++- Pay-in mnemonic configured.
+ - Enabled token assets have contract addresses.
+ - Avalanche RPC is reachable and returns the expected chain id.
+ 
+@@ -137,6 +147,7 @@ It returns non-secret operational configuration:
+ - maximum payout amount per token;
+ - minimum confirmation threshold;
+ - whether payout execution waits for receipts.
++- whether pay-in mnemonic derivation is configured.
+ 
+ It never returns the treasury private key.
+ 
+@@ -255,6 +266,150 @@ It reads the transaction receipt for a broadcasted payout and updates the payout
+ 
+ Chain Flow should call this endpoint after broadcast or run it from a scheduled reconciliation worker.
+ 
++### `POST /api/prepararretiro`
++
++Protected Chain Flow compatibility endpoint.
++
++It accepts provider-style withdrawal payloads using Spanish or modern field names and maps them to `POST /v1/payouts`. Supported aliases include:
++
++- `idRetiro`, `id_retiro`, or `externalId`;
++- `monto` or `amount`;
++- `moneda` or `asset`;
++- `wallet`, `direccionDestino`, or `beneficiaryAddress`.
++
++It also runs the mock risk model before preparing the payout. If risk returns `reject`, the request is rejected before any payout is created.
++
++Example:
++
++```json
++{
++  "idRetiro": "cf-retiro-0001",
++  "monto": "25.50",
++  "moneda": "USDC",
++  "wallet": "0x1111111111111111111111111111111111111111",
++  "beneficiario": "Cliente LATAM"
++}
++```
++
++### `POST /api/autorizarretiro`
++
++Protected Chain Flow compatibility endpoint.
++
++It locates a prepared payout by `payoutId`, `externalId`, `idRetiro`, or `id_retiro`, then calls the same authorization/broadcast path used by `POST /v1/payouts/:id/authorize`.
++
++Example:
++
++```json
++{
++  "idRetiro": "cf-retiro-0001"
++}
++```
++
++### `GET /api/consultarestadoretiro`
++
++Protected Chain Flow compatibility endpoint.
++
++It returns a provider-style status response for a payout. Query by `payoutId`, `externalId`, `idRetiro`, or `id_retiro`.
++
++```http
++GET /api/consultarestadoretiro?idRetiro=cf-retiro-0001
++```
++
++### `POST /api/consultarestadoretiro`
++
++Protected Chain Flow compatibility endpoint.
++
++Same behavior as the GET variant, but accepts a JSON body for providers/orchestrators that standardize on POST status lookups.
++
++### `POST /v1/payins`
++
++Protected pay-in creation endpoint.
++
++It derives a real EVM deposit address from `AVASETTLE_PAYIN_MNEMONIC` using an incrementing derivation index, stores the expected amount, and records the current Avalanche block as the scan start. It does not use mock addresses or a PaymentRouter contract.
++
++If `AVASETTLE_PAYIN_MNEMONIC` is not configured, this endpoint returns a service configuration error.
++
++Example:
++
++```json
++{
++  "externalId": "chainflow-payin-0001",
++  "asset": "USDC",
++  "amount": "100.00",
++  "expiresInMinutes": 60,
++  "metadata": {
++    "country": "BO"
++  }
++}
++```
++
++### `GET /v1/payins`
++
++Protected pay-in listing endpoint.
++
++Returns pay-ins ordered by creation time. Supports `status` and `externalId` filters.
++
++### `GET /v1/payins/:id`
++
++Protected pay-in detail endpoint.
++
++Returns deposit address, derivation index, expected amount, received amount, status, transfer hashes, and audit trail.
++
++### `POST /v1/payins/:id/reconcile`
++
++Protected pay-in reconciliation endpoint.
++
++It scans ERC-20 `Transfer` logs for the configured token contract where `to` equals the derived deposit address. It updates:
++
++- `pending` when no transfer is found;
++- `detected` when the exact amount is found but confirmation depth is not enough;
++- `confirmed` when exact amount and confirmation depth are sufficient;
++- `underpaid` when some funds arrive but less than expected;
++- `overpaid` when more than expected arrives;
++- `expired` when no funds arrive before expiration.
++
++### `POST /v1/reconciliation/run`
++
++Protected semiautomatic reconciliation endpoint.
++
++It attempts to reconcile all `broadcasted` payouts and open pay-ins. Use this from a cron job, worker, or operations dashboard.
++
++### `GET /v1/reports/summary`
++
++Protected institutional report endpoint.
++
++Returns counts by status and basic volume totals for payouts, pay-ins, and simulated fiat settlements.
++
++### `POST /v1/settlements`
++
++Protected simulated fiat settlement endpoint.
++
++Creates a simulated fiat settlement record from a `payout`, `payin`, or `manual` source. It calculates fiat amount using `AVASETTLE_SETTLEMENT_FIAT_RATE`.
++
++### `GET /v1/settlements`
++
++Protected settlement listing endpoint.
++
++Lists simulated settlement records, optionally filtered by status.
++
++### `GET /v1/settlements/:id`
++
++Protected settlement detail endpoint.
++
++Returns one simulated settlement record.
++
++### `POST /v1/settlements/:id/complete`
++
++Protected settlement state endpoint.
++
++Marks a simulated fiat settlement as completed.
++
++### `POST /v1/risk/assess`
++
++Protected risk scoring endpoint.
++
++Runs the encapsulated mock risk model for a payout, pay-in, or address. This is the integration point for a future Wavy Node provider.
++
+ ## Payout Statuses
+ 
+ - `prepared`: request validated and stored, but not sent on-chain.
+@@ -263,10 +418,20 @@ Chain Flow should call this endpoint after broadcast or run it from a scheduled
+ - `confirmed`: transaction succeeded and reached the configured confirmation count.
+ - `failed`: transaction reverted or execution failed.
+ 
++## Pay-In Statuses
++
++- `pending`: address issued and waiting for funds.
++- `detected`: expected funds detected but not enough confirmations yet.
++- `confirmed`: exact expected amount received and finalized.
++- `underpaid`: received less than expected.
++- `overpaid`: received more than expected.
++- `expired`: expiration reached without funds.
++
+ ## Operational Notes
+ 
+ - Use a dedicated treasury hot wallet with limited funds for demos.
++- Use a dedicated pay-in mnemonic and protect it like production key material.
+ - Keep token contract addresses explicit per network and institution.
+ - Rotate `AVASETTLE_API_KEY` before shared demos.
+-- Replace the in-memory ledger before production.
++- Replace the JSON ledger before production.
+ - Add transaction policy checks before supporting mainnet volume.
+diff --git a/src/app.module.ts b/src/app.module.ts
+index b36c15c..8e4c909 100644
+--- a/src/app.module.ts
++++ b/src/app.module.ts
+@@ -7,6 +7,13 @@ import { ConfigurationModule } from './configuration/configuration.module';
+ import { HealthModule } from './health/health.module';
+ import { PayoutsModule } from './payouts/payouts.module';
+ import { TreasuryModule } from './treasury/treasury.module';
++import { StorageModule } from './storage/storage.module';
++import { ChainFlowModule } from './chain-flow/chain-flow.module';
++import { PayinsModule } from './payins/payins.module';
++import { ReconciliationModule } from './reconciliation/reconciliation.module';
++import { ReportsModule } from './reports/reports.module';
++import { SettlementModule } from './settlement/settlement.module';
++import { RiskModule } from './risk/risk.module';
+ 
+ @Module({
+   imports: [
+@@ -16,6 +23,13 @@ import { TreasuryModule } from './treasury/treasury.module';
+     AuditModule,
+     PayoutsModule,
+     TreasuryModule,
++    StorageModule,
++    ChainFlowModule,
++    PayinsModule,
++    ReconciliationModule,
++    ReportsModule,
++    SettlementModule,
++    RiskModule,
+   ],
+   controllers: [AppController],
+   providers: [AppService],
+diff --git a/src/audit/audit.module.ts b/src/audit/audit.module.ts
+index b8b73da..90f1a9f 100644
+--- a/src/audit/audit.module.ts
++++ b/src/audit/audit.module.ts
+@@ -1,7 +1,9 @@
+ import { Module } from '@nestjs/common';
++import { StorageModule } from '../storage/storage.module';
+ import { AuditService } from './audit.service';
+ 
+ @Module({
++  imports: [StorageModule],
+   providers: [AuditService],
+   exports: [AuditService],
+ })
+diff --git a/src/audit/audit.service.ts b/src/audit/audit.service.ts
+index 5ef12ef..d097234 100644
+--- a/src/audit/audit.service.ts
++++ b/src/audit/audit.service.ts
+@@ -1,10 +1,11 @@
+ import { Injectable } from '@nestjs/common';
+ import { randomUUID } from 'node:crypto';
++import { StorageService } from '../storage/storage.service';
+ import { AuditActor, AuditEvent, AuditEventType } from './audit.types';
+ 
+ @Injectable()
+ export class AuditService {
+-  private readonly events: AuditEvent[] = [];
++  constructor(private readonly storage: StorageService) {}
+ 
+   record(input: {
+     type: AuditEventType;
+@@ -21,11 +22,15 @@ export class AuditService {
+       createdAt: new Date().toISOString(),
+     };
+ 
+-    this.events.push(event);
++    this.storage.update((state) => {
++      state.auditEvents.push(event);
++    });
+     return event;
+   }
+ 
+   listBySubject(subjectId: string): AuditEvent[] {
+-    return this.events.filter((event) => event.subjectId === subjectId);
++    return this.storage.snapshot.auditEvents.filter(
++      (event) => event.subjectId === subjectId,
++    );
+   }
+ }
+diff --git a/src/audit/audit.types.ts b/src/audit/audit.types.ts
+index d2307a4..9d03269 100644
+--- a/src/audit/audit.types.ts
++++ b/src/audit/audit.types.ts
+@@ -5,7 +5,12 @@ export type AuditEventType =
+   | 'PAYOUT_BROADCASTED'
+   | 'PAYOUT_CONFIRMED'
+   | 'PAYOUT_FAILED'
+-  | 'PAYOUT_RECONCILED';
++  | 'PAYOUT_RECONCILED'
++  | 'PAYIN_CREATED'
++  | 'PAYIN_RECONCILED'
++  | 'SETTLEMENT_CREATED'
++  | 'SETTLEMENT_COMPLETED'
++  | 'RISK_ASSESSED';
+ 
+ export type AuditActor = {
+   institutionId: string | null;
+diff --git a/src/blockchain/blockchain.service.ts b/src/blockchain/blockchain.service.ts
+index 72c27e3..254a512 100644
+--- a/src/blockchain/blockchain.service.ts
++++ b/src/blockchain/blockchain.service.ts
+@@ -14,14 +14,16 @@ import {
+   formatUnits,
+   http,
+   isAddress,
++  parseAbiItem,
+   parseUnits,
+ } from 'viem';
+-import { privateKeyToAccount } from 'viem/accounts';
++import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
+ import { avalanche, avalancheFuji } from 'viem/chains';
+ import { ConfigurationService } from '../configuration/configuration.service';
+ import { SettlementAsset } from '../configuration/configuration.types';
+ import {
+   NativeTreasuryBalance,
++  IncomingErc20Transfer,
+   TransactionReconciliation,
+   TransferExecution,
+   TreasuryBalance,
+@@ -50,6 +52,24 @@ export class BlockchainService {
+     });
+   }
+ 
++  getLatestBlockNumber(): Promise<bigint> {
++    return this.publicClient.getBlockNumber();
++  }
++
++  derivePayInAddress(index: number): Address {
++    const mnemonic = this.configuration.payInMnemonic;
++    if (!mnemonic) {
++      throw new ServiceUnavailableException(
++        'AvaSettle pay-in mnemonic is not configured.',
++      );
++    }
++
++    return mnemonicToAccount(mnemonic, {
++      accountIndex: this.configuration.payInDerivationAccount,
++      addressIndex: index,
++    }).address;
++  }
++
+   toAtomicAmount(asset: SettlementAsset, amount: string): bigint {
+     const assetConfig = this.requireAsset(asset);
+ 
+@@ -112,6 +132,62 @@ export class BlockchainService {
+     };
+   }
+ 
++  async getAssetBalanceForAddress(input: {
++    asset: SettlementAsset;
++    address: Address;
++  }): Promise<TreasuryBalance> {
++    const assetConfig = this.requireAsset(input.asset);
++    const balance = await this.publicClient.readContract({
++      address: assetConfig.address,
++      abi: erc20Abi,
++      functionName: 'balanceOf',
++      args: [input.address],
++    });
++
++    return {
++      asset: input.asset,
++      tokenAddress: assetConfig.address,
++      decimals: assetConfig.decimals,
++      balanceAtomic: balance.toString(),
++      balance: formatUnits(balance, assetConfig.decimals),
++    };
++  }
++
++  async findIncomingErc20Transfers(input: {
++    asset: SettlementAsset;
++    to: Address;
++    fromBlock: bigint;
++  }): Promise<IncomingErc20Transfer[]> {
++    const assetConfig = this.requireAsset(input.asset);
++    const latestBlock = await this.publicClient.getBlockNumber();
++    const configuredFromBlock =
++      input.fromBlock > 0n
++        ? input.fromBlock
++        : latestBlock - this.configuration.payInLookbackBlocks;
++    const fromBlock = configuredFromBlock > 0n ? configuredFromBlock : 0n;
++    const transferEvent = parseAbiItem(
++      'event Transfer(address indexed from, address indexed to, uint256 value)',
++    );
++    const logs = await this.publicClient.getLogs({
++      address: assetConfig.address,
++      event: transferEvent,
++      args: {
++        to: input.to,
++      },
++      fromBlock,
++      toBlock: 'latest',
++    });
++
++    return logs.map((log) => ({
++      hash: log.transactionHash,
++      from: log.args.from as `0x${string}`,
++      to: log.args.to as `0x${string}`,
++      amountAtomic: (log.args.value ?? 0n).toString(),
++      amount: formatUnits(log.args.value ?? 0n, assetConfig.decimals),
++      blockNumber: log.blockNumber.toString(),
++    }));
++  }
++
+   async sendErc20Transfer(input: {
+     asset: SettlementAsset;
+     to: Address;
+diff --git a/src/blockchain/blockchain.types.ts b/src/blockchain/blockchain.types.ts
+index 36e92e6..c70a3c1 100644
+--- a/src/blockchain/blockchain.types.ts
++++ b/src/blockchain/blockchain.types.ts
+@@ -32,3 +32,12 @@ export type TransactionReconciliation = {
+   confirmations: number;
+   finalized: boolean;
+ };
++
++export type IncomingErc20Transfer = {
++  hash: Hash;
++  from: `0x${string}`;
++  to: `0x${string}`;
++  amountAtomic: string;
++  amount: string;
++  blockNumber: string;
++};
+diff --git a/src/configuration/configuration.service.ts b/src/configuration/configuration.service.ts
+index 128ae3a..c4972ed 100644
+--- a/src/configuration/configuration.service.ts
++++ b/src/configuration/configuration.service.ts
+@@ -1,5 +1,6 @@
+ import { Injectable } from '@nestjs/common';
+ import { createHash, timingSafeEqual } from 'node:crypto';
++import { resolve } from 'node:path';
+ import {
+   AssetRuntimeConfig,
+   NetworkSummary,
+@@ -98,6 +99,43 @@ export class ConfigurationService {
+     return this.readBoolean('AVASETTLE_WAIT_FOR_RECEIPT', false);
+   }
+ 
++  get storageFilePath(): string {
++    return resolve(
++      process.cwd(),
++      process.env.AVASETTLE_STORAGE_FILE ?? 'data/avasettle-ledger.json',
++    );
++  }
++
++  get payInMnemonic(): string | null {
++    return process.env.AVASETTLE_PAYIN_MNEMONIC?.trim() || null;
++  }
++
++  get payInDerivationAccount(): number {
++    return this.readInt('AVASETTLE_PAYIN_DERIVATION_ACCOUNT', 0);
++  }
++
++  get payInLookbackBlocks(): bigint {
++    return BigInt(this.readInt('AVASETTLE_PAYIN_LOOKBACK_BLOCKS', 50_000));
++  }
++
++  get fiatSettlementCurrency(): string {
++    return (process.env.AVASETTLE_SETTLEMENT_FIAT_CURRENCY ?? 'USD')
++      .trim()
++      .toUpperCase();
++  }
++
++  get fiatSettlementRate(): number {
++    return this.readNumber('AVASETTLE_SETTLEMENT_FIAT_RATE', 1);
++  }
++
++  get riskReviewAmount(): number {
++    return this.readNumber('AVASETTLE_RISK_REVIEW_AMOUNT', 10_000);
++  }
++
++  get riskRejectAmount(): number {
++    return this.readNumber('AVASETTLE_RISK_REJECT_AMOUNT', 50_000);
++  }
++
+   get treasuryPrivateKey(): `0x${string}` | null {
+     const raw = process.env.AVASETTLE_TREASURY_PRIVATE_KEY;
+     if (!raw) return null;
+@@ -173,4 +211,16 @@ export class ConfigurationService {
+ 
+     return parsed;
+   }
++
++  private readNumber(name: string, fallback: number): number {
++    const value = process.env[name];
++    if (value === undefined || value === '') return fallback;
++
++    const parsed = Number(value);
++    if (!Number.isFinite(parsed) || parsed <= 0) {
++      throw new Error(`${name} must be a positive number.`);
++    }
++
++    return parsed;
++  }
+ }
+diff --git a/src/health/health.service.ts b/src/health/health.service.ts
+index ea19526..303a19a 100644
+--- a/src/health/health.service.ts
++++ b/src/health/health.service.ts
+@@ -22,6 +22,7 @@ export class HealthService {
+     const checks = {
+       apiKeyConfigured: this.configuration.apiKeyConfigured,
+       treasuryConfigured: this.configuration.treasuryConfigured,
++      payInMnemonicConfigured: Boolean(this.configuration.payInMnemonic),
+       assetsConfigured: this.configuration
+         .getConfiguredAssets()
+         .every((asset) => asset.configured),
+diff --git a/src/main.ts b/src/main.ts
+index 8449d6b..ae9f6d1 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -49,6 +49,18 @@ async function bootstrap() {
+       'payouts',
+       'Institutional payout lifecycle and on-chain reconciliation.',
+     )
++    .addTag(
++      'chain-flow-compat',
++      'Legacy provider endpoints consumed by Chain Flow.',
++    )
++    .addTag(
++      'payins',
++      'Real EVM deposit address generation and pay-in reconciliation.',
++    )
++    .addTag('reconciliation', 'Semi-automatic on-chain reconciliation jobs.')
++    .addTag('reports', 'Institutional operational reporting.')
++    .addTag('settlement', 'Simulated fiat settlement records.')
++    .addTag('risk', 'Mock risk scoring integration seam for Wavy Node.')
+     .addApiKey(
+       {
+         type: 'apiKey',
+diff --git a/src/payouts/payout-ledger.service.ts b/src/payouts/payout-ledger.service.ts
+index fa5087b..e82d272 100644
+--- a/src/payouts/payout-ledger.service.ts
++++ b/src/payouts/payout-ledger.service.ts
+@@ -1,31 +1,37 @@
+ import { Injectable } from '@nestjs/common';
++import { StorageService } from '../storage/storage.service';
+ import { PayoutRecord, PayoutStatus } from './payout.types';
+ 
+ @Injectable()
+ export class PayoutLedgerService {
+-  private readonly records = new Map<string, PayoutRecord>();
+-  private readonly idsByExternalId = new Map<string, string>();
++  constructor(private readonly storage: StorageService) {}
+ 
+   create(record: PayoutRecord): PayoutRecord {
+-    this.records.set(record.id, record);
+-    this.idsByExternalId.set(record.externalId, record.id);
++    this.storage.update((state) => {
++      state.payouts.push(record);
++    });
+     return record;
+   }
+ 
+   findById(id: string): PayoutRecord | null {
+-    return this.records.get(id) ?? null;
++    return (
++      this.storage.snapshot.payouts.find((record) => record.id === id) ?? null
++    );
+   }
+ 
+   findByExternalId(externalId: string): PayoutRecord | null {
+-    const id = this.idsByExternalId.get(externalId);
+-    return id ? this.findById(id) : null;
++    return (
++      this.storage.snapshot.payouts.find(
++        (record) => record.externalId === externalId,
++      ) ?? null
++    );
+   }
+ 
+   list(filters: {
+     status?: PayoutStatus;
+     externalId?: string;
+   }): PayoutRecord[] {
+-    const records = Array.from(this.records.values());
++    const records = this.storage.snapshot.payouts;
+     return records
+       .filter((record) => !filters.status || record.status === filters.status)
+       .filter(
+@@ -36,15 +42,17 @@ export class PayoutLedgerService {
+   }
+ 
+   update(id: string, patch: Partial<PayoutRecord>): PayoutRecord | null {
+-    const current = this.findById(id);
+-    if (!current) return null;
++    return this.storage.update((state) => {
++      const index = state.payouts.findIndex((record) => record.id === id);
++      if (index === -1) return null;
+ 
+-    const next = {
+-      ...current,
+-      ...patch,
+-      updatedAt: new Date().toISOString(),
+-    };
+-    this.records.set(id, next);
+-    return next;
++      const next = {
++        ...state.payouts[index],
++        ...patch,
++        updatedAt: new Date().toISOString(),
++      };
++      state.payouts[index] = next;
++      return next;
++    });
+   }
+ }
+diff --git a/src/payouts/payouts.module.ts b/src/payouts/payouts.module.ts
+index 8b32044..d9dea05 100644
+--- a/src/payouts/payouts.module.ts
++++ b/src/payouts/payouts.module.ts
+@@ -2,13 +2,15 @@ import { Module } from '@nestjs/common';
+ import { AuditModule } from '../audit/audit.module';
+ import { BlockchainModule } from '../blockchain/blockchain.module';
+ import { ConfigurationModule } from '../configuration/configuration.module';
++import { StorageModule } from '../storage/storage.module';
+ import { PayoutLedgerService } from './payout-ledger.service';
+ import { PayoutsController } from './payouts.controller';
+ import { PayoutsService } from './payouts.service';
+ 
+ @Module({
+-  imports: [AuditModule, BlockchainModule, ConfigurationModule],
++  imports: [AuditModule, BlockchainModule, ConfigurationModule, StorageModule],
+   controllers: [PayoutsController],
+   providers: [PayoutsService, PayoutLedgerService],
++  exports: [PayoutsService, PayoutLedgerService],
+ })
+ export class PayoutsModule {}
+diff --git a/src/payouts/payouts.service.ts b/src/payouts/payouts.service.ts
+index 4cafbdd..c1e03a8 100644
+--- a/src/payouts/payouts.service.ts
++++ b/src/payouts/payouts.service.ts
+@@ -100,6 +100,12 @@ export class PayoutsService {
+     return this.toResponse(payout);
+   }
+ 
++  getPayoutByExternalId(externalId: string): PayoutResponse {
++    const payout = this.ledger.findByExternalId(externalId);
++    if (!payout) throw new NotFoundException('Payout not found.');
++    return this.toResponse(payout);
++  }
++
+   async authorizePayout(
+     id: string,
+     dto: AuthorizePayoutDto,
+diff --git a/src/treasury/treasury.service.ts b/src/treasury/treasury.service.ts
+index f318a5f..417509d 100644
+--- a/src/treasury/treasury.service.ts
++++ b/src/treasury/treasury.service.ts
+@@ -17,6 +17,11 @@ export class TreasuryService {
+         configured: this.configuration.treasuryConfigured,
+         address: this.blockchain.treasuryAddress,
+       },
++      payins: {
++        mnemonicConfigured: Boolean(this.configuration.payInMnemonic),
++        derivationAccount: this.configuration.payInDerivationAccount,
++        lookbackBlocks: this.configuration.payInLookbackBlocks.toString(),
++      },
+       settlement: {
+         enabledAssets: this.configuration.getConfiguredAssets(),
+         minConfirmations: this.configuration.minConfirmations,

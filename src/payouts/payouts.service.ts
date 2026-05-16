@@ -100,6 +100,12 @@ export class PayoutsService {
     return this.toResponse(payout);
   }
 
+  getPayoutByExternalId(externalId: string): PayoutResponse {
+    const payout = this.ledger.findByExternalId(externalId);
+    if (!payout) throw new NotFoundException('Payout not found.');
+    return this.toResponse(payout);
+  }
+
   async authorizePayout(
     id: string,
     dto: AuthorizePayoutDto,

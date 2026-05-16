@@ -1,31 +1,37 @@
 import { Injectable } from '@nestjs/common';
+import { StorageService } from '../storage/storage.service';
 import { PayoutRecord, PayoutStatus } from './payout.types';
 
 @Injectable()
 export class PayoutLedgerService {
-  private readonly records = new Map<string, PayoutRecord>();
-  private readonly idsByExternalId = new Map<string, string>();
+  constructor(private readonly storage: StorageService) {}
 
   create(record: PayoutRecord): PayoutRecord {
-    this.records.set(record.id, record);
-    this.idsByExternalId.set(record.externalId, record.id);
+    this.storage.update((state) => {
+      state.payouts.push(record);
+    });
     return record;
   }
 
   findById(id: string): PayoutRecord | null {
-    return this.records.get(id) ?? null;
+    return (
+      this.storage.snapshot.payouts.find((record) => record.id === id) ?? null
+    );
   }
 
   findByExternalId(externalId: string): PayoutRecord | null {
-    const id = this.idsByExternalId.get(externalId);
-    return id ? this.findById(id) : null;
+    return (
+      this.storage.snapshot.payouts.find(
+        (record) => record.externalId === externalId,
+      ) ?? null
+    );
   }
 
   list(filters: {
     status?: PayoutStatus;
     externalId?: string;
   }): PayoutRecord[] {
-    const records = Array.from(this.records.values());
+    const records = this.storage.snapshot.payouts;
     return records
       .filter((record) => !filters.status || record.status === filters.status)
       .filter(
@@ -36,15 +42,17 @@ export class PayoutLedgerService {
   }
 
   update(id: string, patch: Partial<PayoutRecord>): PayoutRecord | null {
-    const current = this.findById(id);
-    if (!current) return null;
+    return this.storage.update((state) => {
+      const index = state.payouts.findIndex((record) => record.id === id);
+      if (index === -1) return null;
 
-    const next = {
-      ...current,
-      ...patch,
-      updatedAt: new Date().toISOString(),
-    };
-    this.records.set(id, next);
-    return next;
+      const next = {
+        ...state.payouts[index],
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      state.payouts[index] = next;
+      return next;
+    });
   }
 }

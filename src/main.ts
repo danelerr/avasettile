@@ -49,6 +49,18 @@ async function bootstrap() {
       'payouts',
       'Institutional payout lifecycle and on-chain reconciliation.',
     )
+    .addTag(
+      'chain-flow-compat',
+      'Legacy provider endpoints consumed by Chain Flow.',
+    )
+    .addTag(
+      'payins',
+      'Real EVM deposit address generation and pay-in reconciliation.',
+    )
+    .addTag('reconciliation', 'Semi-automatic on-chain reconciliation jobs.')
+    .addTag('reports', 'Institutional operational reporting.')
+    .addTag('settlement', 'Simulated fiat settlement records.')
+    .addTag('risk', 'Mock risk scoring integration seam for Wavy Node.')
     .addApiKey(
       {
         type: 'apiKey',

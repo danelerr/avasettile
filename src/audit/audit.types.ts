@@ -5,7 +5,12 @@ export type AuditEventType =
   | 'PAYOUT_BROADCASTED'
   | 'PAYOUT_CONFIRMED'
   | 'PAYOUT_FAILED'
-  | 'PAYOUT_RECONCILED';
+  | 'PAYOUT_RECONCILED'
+  | 'PAYIN_CREATED'
+  | 'PAYIN_RECONCILED'
+  | 'SETTLEMENT_CREATED'
+  | 'SETTLEMENT_COMPLETED'
+  | 'RISK_ASSESSED';
 
 export type AuditActor = {
   institutionId: string | null;

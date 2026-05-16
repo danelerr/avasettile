@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { StorageService } from '../storage/storage.service';
 import { AuditActor, AuditEvent, AuditEventType } from './audit.types';
 
 @Injectable()
 export class AuditService {
-  private readonly events: AuditEvent[] = [];
+  constructor(private readonly storage: StorageService) {}
 
   record(input: {
     type: AuditEventType;
@@ -21,11 +22,15 @@ export class AuditService {
       createdAt: new Date().toISOString(),
     };
 
-    this.events.push(event);
+    this.storage.update((state) => {
+      state.auditEvents.push(event);
+    });
     return event;
   }
 
   listBySubject(subjectId: string): AuditEvent[] {
-    return this.events.filter((event) => event.subjectId === subjectId);
+    return this.storage.snapshot.auditEvents.filter(
+      (event) => event.subjectId === subjectId,
+    );
   }
 }

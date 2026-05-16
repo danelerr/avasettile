@@ -17,6 +17,11 @@ export class TreasuryService {
         configured: this.configuration.treasuryConfigured,
         address: this.blockchain.treasuryAddress,
       },
+      payins: {
+        mnemonicConfigured: Boolean(this.configuration.payInMnemonic),
+        derivationAccount: this.configuration.payInDerivationAccount,
+        lookbackBlocks: this.configuration.payInLookbackBlocks.toString(),
+      },
       settlement: {
         enabledAssets: this.configuration.getConfiguredAssets(),
         minConfirmations: this.configuration.minConfirmations,

@@ -32,3 +32,12 @@ export type TransactionReconciliation = {
   confirmations: number;
   finalized: boolean;
 };
+
+export type IncomingErc20Transfer = {
+  hash: Hash;
+  from: `0x${string}`;
+  to: `0x${string}`;
+  amountAtomic: string;
+  amount: string;
+  blockNumber: string;
+};

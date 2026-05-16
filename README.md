@@ -9,11 +9,14 @@ This service is intentionally isolated from the existing Parmelia Worker and is 
 - Validates B2B calls with `x-avasettle-api-key` or `Authorization: Bearer`.
 - Prepares idempotent payout intents from Chain Flow.
 - Authorizes and broadcasts ERC-20 treasury transfers with `viem`.
+- Creates real EVM pay-in deposit addresses from a configured mnemonic.
+- Scans ERC-20 `Transfer` logs to reconcile pay-ins.
 - Reconciles transaction receipts and confirmation depth.
 - Exposes treasury status and balances.
-- Records an in-memory audit trail behind a repository boundary.
+- Records a JSON-file ledger and audit trail behind a repository boundary.
+- Provides reports, mock risk scoring, and simulated fiat settlement.
 
-The current ledger is in memory so the hackathon backend is easy to run. The `PayoutLedgerService` is the replacement point for Postgres, D1, DynamoDB or another durable ledger.
+The current ledger persists to `AVASETTLE_STORAGE_FILE`, defaulting to `data/avasettle-ledger.json`. This is intentionally simple for the hackathon; `StorageService`, `PayoutLedgerService`, and `PayInLedgerService` are the replacement points for Postgres, D1, DynamoDB or another durable ledger.
 
 ## Foundry And Smart Contracts
 
@@ -52,14 +55,20 @@ PORT=3001
 AVASETTLE_API_KEY=change-me
 AVASETTLE_NETWORK=avalanche-fuji
 AVASETTLE_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
+AVASETTLE_STORAGE_FILE=data/avasettle-ledger.json
 AVASETTLE_TREASURY_PRIVATE_KEY=0x...
+AVASETTLE_PAYIN_MNEMONIC=
 AVASETTLE_ENABLED_ASSETS=USDC
 AVASETTLE_USDC_ADDRESS=0x...
 AVASETTLE_USDC_DECIMALS=6
 AVASETTLE_MAX_PAYOUT_USDC=1000
+AVASETTLE_SETTLEMENT_FIAT_CURRENCY=USD
+AVASETTLE_SETTLEMENT_FIAT_RATE=1
 ```
 
 Do not rely on default token addresses for production. Configure the exact stablecoin contract used by the institution and selected Avalanche network.
+
+Do not configure pay-ins with a throwaway mnemonic in production. `AVASETTLE_PAYIN_MNEMONIC` derives real EVM addresses, so it controls funds received at those addresses.
 
 ## Swagger / OpenAPI
 
@@ -85,7 +94,7 @@ Use one of the available security schemes in Swagger:
 
 ## API Contract For Chain Flow
 
-All `/v1/*` endpoints require the API key.
+All `/v1/*` and `/api/*` endpoints require the API key, except public health/metadata endpoints.
 
 Common headers:
 
@@ -119,6 +128,7 @@ It checks whether AvaSettle is operationally ready to process payouts:
 
 - API key configured.
 - Treasury private key configured.
+- Pay-in mnemonic configured.
 - Enabled token assets have contract addresses.
 - Avalanche RPC is reachable and returns the expected chain id.
 
@@ -137,6 +147,7 @@ It returns non-secret operational configuration:
 - maximum payout amount per token;
 - minimum confirmation threshold;
 - whether payout execution waits for receipts.
+- whether pay-in mnemonic derivation is configured.
 
 It never returns the treasury private key.
 
@@ -255,6 +266,150 @@ It reads the transaction receipt for a broadcasted payout and updates the payout
 
 Chain Flow should call this endpoint after broadcast or run it from a scheduled reconciliation worker.
 
+### `POST /api/prepararretiro`
+
+Protected Chain Flow compatibility endpoint.
+
+It accepts provider-style withdrawal payloads using Spanish or modern field names and maps them to `POST /v1/payouts`. Supported aliases include:
+
+- `idRetiro`, `id_retiro`, or `externalId`;
+- `monto` or `amount`;
+- `moneda` or `asset`;
+- `wallet`, `direccionDestino`, or `beneficiaryAddress`.
+
+It also runs the mock risk model before preparing the payout. If risk returns `reject`, the request is rejected before any payout is created.
+
+Example:
+
+```json
+{
+  "idRetiro": "cf-retiro-0001",
+  "monto": "25.50",
+  "moneda": "USDC",
+  "wallet": "0x1111111111111111111111111111111111111111",
+  "beneficiario": "Cliente LATAM"
+}
+```
+
+### `POST /api/autorizarretiro`
+
+Protected Chain Flow compatibility endpoint.
+
+It locates a prepared payout by `payoutId`, `externalId`, `idRetiro`, or `id_retiro`, then calls the same authorization/broadcast path used by `POST /v1/payouts/:id/authorize`.
+
+Example:
+
+```json
+{
+  "idRetiro": "cf-retiro-0001"
+}
+```
+
+### `GET /api/consultarestadoretiro`
+
+Protected Chain Flow compatibility endpoint.
+
+It returns a provider-style status response for a payout. Query by `payoutId`, `externalId`, `idRetiro`, or `id_retiro`.
+
+```http
+GET /api/consultarestadoretiro?idRetiro=cf-retiro-0001
+```
+
+### `POST /api/consultarestadoretiro`
+
+Protected Chain Flow compatibility endpoint.
+
+Same behavior as the GET variant, but accepts a JSON body for providers/orchestrators that standardize on POST status lookups.
+
+### `POST /v1/payins`
+
+Protected pay-in creation endpoint.
+
+It derives a real EVM deposit address from `AVASETTLE_PAYIN_MNEMONIC` using an incrementing derivation index, stores the expected amount, and records the current Avalanche block as the scan start. It does not use mock addresses or a PaymentRouter contract.
+
+If `AVASETTLE_PAYIN_MNEMONIC` is not configured, this endpoint returns a service configuration error.
+
+Example:
+
+```json
+{
+  "externalId": "chainflow-payin-0001",
+  "asset": "USDC",
+  "amount": "100.00",
+  "expiresInMinutes": 60,
+  "metadata": {
+    "country": "BO"
+  }
+}
+```
+
+### `GET /v1/payins`
+
+Protected pay-in listing endpoint.
+
+Returns pay-ins ordered by creation time. Supports `status` and `externalId` filters.
+
+### `GET /v1/payins/:id`
+
+Protected pay-in detail endpoint.
+
+Returns deposit address, derivation index, expected amount, received amount, status, transfer hashes, and audit trail.
+
+### `POST /v1/payins/:id/reconcile`
+
+Protected pay-in reconciliation endpoint.
+
+It scans ERC-20 `Transfer` logs for the configured token contract where `to` equals the derived deposit address. It updates:
+
+- `pending` when no transfer is found;
+- `detected` when the exact amount is found but confirmation depth is not enough;
+- `confirmed` when exact amount and confirmation depth are sufficient;
+- `underpaid` when some funds arrive but less than expected;
+- `overpaid` when more than expected arrives;
+- `expired` when no funds arrive before expiration.
+
+### `POST /v1/reconciliation/run`
+
+Protected semiautomatic reconciliation endpoint.
+
+It attempts to reconcile all `broadcasted` payouts and open pay-ins. Use this from a cron job, worker, or operations dashboard.
+
+### `GET /v1/reports/summary`
+
+Protected institutional report endpoint.
+
+Returns counts by status and basic volume totals for payouts, pay-ins, and simulated fiat settlements.
+
+### `POST /v1/settlements`
+
+Protected simulated fiat settlement endpoint.
+
+Creates a simulated fiat settlement record from a `payout`, `payin`, or `manual` source. It calculates fiat amount using `AVASETTLE_SETTLEMENT_FIAT_RATE`.
+
+### `GET /v1/settlements`
+
+Protected settlement listing endpoint.
+
+Lists simulated settlement records, optionally filtered by status.
+
+### `GET /v1/settlements/:id`
+
+Protected settlement detail endpoint.
+
+Returns one simulated settlement record.
+
+### `POST /v1/settlements/:id/complete`
+
+Protected settlement state endpoint.
+
+Marks a simulated fiat settlement as completed.
+
+### `POST /v1/risk/assess`
+
+Protected risk scoring endpoint.
+
+Runs the encapsulated mock risk model for a payout, pay-in, or address. This is the integration point for a future Wavy Node provider.
+
 ## Payout Statuses
 
 - `prepared`: request validated and stored, but not sent on-chain.
@@ -263,10 +418,20 @@ Chain Flow should call this endpoint after broadcast or run it from a scheduled 
 - `confirmed`: transaction succeeded and reached the configured confirmation count.
 - `failed`: transaction reverted or execution failed.
 
+## Pay-In Statuses
+
+- `pending`: address issued and waiting for funds.
+- `detected`: expected funds detected but not enough confirmations yet.
+- `confirmed`: exact expected amount received and finalized.
+- `underpaid`: received less than expected.
+- `overpaid`: received more than expected.
+- `expired`: expiration reached without funds.
+
 ## Operational Notes
 
 - Use a dedicated treasury hot wallet with limited funds for demos.
+- Use a dedicated pay-in mnemonic and protect it like production key material.
 - Keep token contract addresses explicit per network and institution.
 - Rotate `AVASETTLE_API_KEY` before shared demos.
-- Replace the in-memory ledger before production.
+- Replace the JSON ledger before production.
 - Add transaction policy checks before supporting mainnet volume.

@@ -22,6 +22,7 @@ export class HealthService {
     const checks = {
       apiKeyConfigured: this.configuration.apiKeyConfigured,
       treasuryConfigured: this.configuration.treasuryConfigured,
+      payInMnemonicConfigured: Boolean(this.configuration.payInMnemonic),
       assetsConfigured: this.configuration
         .getConfiguredAssets()
         .every((asset) => asset.configured),
