@@ -78,9 +78,9 @@ type Merchant @table(name: "merchants") {
 
 type Asset @table(name: "assets") {
   id: UUID! @default(sql: "gen_random_uuid()")
-  network: String! @col(dataType: "avasettle_network")
+  network: String!
   chainId: Int! @col(name: "chain_id")
-  symbol: String! @col(dataType: "asset_symbol")
+  symbol: String!
   tokenAddress: String @col(name: "token_address")
   decimals: Int!
   enabled: Boolean! @default(value: true)
@@ -92,7 +92,7 @@ type Asset @table(name: "assets") {
 type TreasuryWallet @table(name: "treasury_wallets") {
   id: UUID! @default(sql: "gen_random_uuid()")
   institutionId: UUID @col(name: "institution_id")
-  network: String! @col(dataType: "avasettle_network")
+  network: String!
   chainId: Int! @col(name: "chain_id")
   address: String!
   label: String
@@ -116,9 +116,9 @@ type PayinIntent
   status: PayinStatus!
     @col(dataType: "payin_status")
     @default(value: pending)
-  network: String! @col(dataType: "avasettle_network")
+  network: String!
   chainId: Int! @col(name: "chain_id")
-  asset: String! @col(dataType: "asset_symbol")
+  asset: String!
   tokenAddress: String @col(name: "token_address")
   decimals: Int! @default(value: 6)
   amountExpected: Float!
@@ -191,9 +191,9 @@ type PayoutRequest
   status: PayoutStatus!
     @col(dataType: "payout_status")
     @default(value: prepared)
-  network: String! @col(dataType: "avasettle_network")
+  network: String!
   chainId: Int! @col(name: "chain_id")
-  asset: String! @col(dataType: "asset_symbol")
+  asset: String!
   tokenAddress: String @col(name: "token_address")
   decimals: Int! @default(value: 6)
   amount: Float! @col(dataType: "numeric(36, 18)")
@@ -230,7 +230,7 @@ type Settlement
   status: SettlementStatus!
     @col(dataType: "settlement_status")
     @default(value: pending)
-  asset: String! @col(dataType: "asset_symbol")
+  asset: String!
   grossAmount: Float! @col(name: "gross_amount", dataType: "numeric(36, 18)")
   feeBps: Int! @col(name: "fee_bps") @default(value: 0)
   feeAmount: Float!
@@ -256,7 +256,7 @@ type RiskAssessment @table(name: "risk_assessments") {
   subjectType: String! @col(name: "subject_type")
   subjectId: UUID @col(name: "subject_id")
   address: String
-  asset: String @col(dataType: "asset_symbol")
+  asset: String
   amount: Float @col(dataType: "numeric(36, 18)")
   provider: String! @default(value: "mock")
   riskLevel: RiskLevel! @col(name: "risk_level", dataType: "risk_level")
@@ -274,7 +274,7 @@ type AuditEvent
   @index(fields: ["createdAt"], order: [DESC]) {
   id: UUID! @default(sql: "gen_random_uuid()")
   institutionId: UUID @col(name: "institution_id")
-  actorType: String! @col(name: "actor_type", dataType: "audit_actor_type")
+  actorType: String! @col(name: "actor_type")
   actorId: String @col(name: "actor_id")
   subjectType: String! @col(name: "subject_type")
   subjectId: UUID @col(name: "subject_id")

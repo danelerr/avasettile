@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  dataconnect-generated: link:../../../AppData/Local/pnpm/global/5/node_modules/src/dataconnect-generated
+
 importers:
 
   .:
@@ -26,6 +29,9 @@ importers:
       class-validator:
         specifier: ^0.14.2
         version: 0.14.4
+      dataconnect-generated:
+        specifier: link:../../../AppData/Local/pnpm/global/5/node_modules/src/dataconnect-generated
+        version: link:../../../AppData/Local/pnpm/global/5/node_modules/src/dataconnect-generated
       dotenv:
         specifier: ^17.2.3
         version: 17.4.2
