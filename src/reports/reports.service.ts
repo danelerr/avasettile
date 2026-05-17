@@ -26,6 +26,14 @@ export class ReportsService {
       payins: {
         count: snapshot.payins.length,
         byStatus: this.countBy(snapshot.payins, (item) => item.status),
+        byCollectionMode: this.countBy(
+          snapshot.payins,
+          (item) => item.collectionMode ?? 'derived-address',
+        ),
+        bySweepStatus: this.countBy(
+          snapshot.payins,
+          (item) => item.sweepStatus ?? 'pending',
+        ),
         expectedVolumeByAsset: this.sumBy(
           snapshot.payins,
           (item) => item.asset,
@@ -36,6 +44,11 @@ export class ReportsService {
           (item) => item.asset,
           (item) => item.receivedAmount,
         ),
+        sweptVolumeByAsset: this.sumBy(
+          snapshot.payins,
+          (item) => item.asset,
+          (item) => item.sweptAmount ?? '0',
+        ),
       },
       settlements: {
         count: snapshot.settlements.length,
@@ -45,6 +58,14 @@ export class ReportsService {
           (item) => item.fiatCurrency,
           (item) => item.fiatAmount,
         ),
+      },
+      privateSettlements: {
+        count: snapshot.privateSettlements.length,
+        byStatus: this.countBy(
+          snapshot.privateSettlements,
+          (item) => item.status,
+        ),
+        byMode: this.countBy(snapshot.privateSettlements, (item) => item.mode),
       },
     };
   }

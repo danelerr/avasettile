@@ -26,7 +26,7 @@ export class AppController {
           chainId: 43113,
           name: 'Avalanche Fuji Testnet',
           nativeTokenSymbol: 'AVAX',
-          explorerBaseUrl: 'https://testnet.snowtrace.io',
+          explorerBaseUrl: 'https://subnets-test.avax.network/c-chain',
           rpcUrl: 'https://api.avax-test.network/ext/bc/C/rpc',
         },
       },

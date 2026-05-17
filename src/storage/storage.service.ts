@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { dirname } from 'node:path';
 import { ConfigurationService } from '../configuration/configuration.service';
+import { PayInCollectionMode, PayInSweepStatus } from '../payins/payins.types';
 import { StorageState } from './storage.types';
 
 @Injectable()
@@ -42,6 +43,20 @@ export class StorageService {
     this.state = {
       ...this.emptyState(),
       ...parsed,
+      payins: (parsed.payins ?? []).map((payin) => ({
+        ...payin,
+        collectionMode:
+          payin.collectionMode ?? PayInCollectionMode.DerivedAddress,
+        routerAddress: payin.routerAddress ?? null,
+        routerInvoiceId: payin.routerInvoiceId ?? null,
+        sweepStatus: payin.sweepStatus ?? PayInSweepStatus.Pending,
+        sweepTransactionHash: payin.sweepTransactionHash ?? null,
+        sweptAmount: payin.sweptAmount ?? '0',
+        sweptAmountAtomic: payin.sweptAmountAtomic ?? '0',
+        sweptAt: payin.sweptAt ?? null,
+        sweepFailureReason: payin.sweepFailureReason ?? null,
+      })),
+      privateSettlements: parsed.privateSettlements ?? [],
       counters: {
         ...this.emptyState().counters,
         ...(parsed.counters ?? {}),
@@ -65,6 +80,7 @@ export class StorageService {
       auditEvents: [],
       payins: [],
       settlements: [],
+      privateSettlements: [],
       counters: {
         payinAddressIndex: 0,
       },

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -12,10 +13,13 @@ import {
   erc20Abi,
   formatEther,
   formatUnits,
+  getAddress,
   http,
   isAddress,
   parseAbiItem,
   parseUnits,
+  stringToBytes,
+  keccak256,
 } from 'viem';
 import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
 import { avalanche, avalancheFuji } from 'viem/chains';
@@ -24,6 +28,8 @@ import { SettlementAsset } from '../configuration/configuration.types';
 import {
   NativeTreasuryBalance,
   IncomingErc20Transfer,
+  PaymentRouterInvoicePayment,
+  SweepExecution,
   TransactionReconciliation,
   TransferExecution,
   TreasuryBalance,
@@ -57,6 +63,14 @@ export class BlockchainService {
   }
 
   derivePayInAddress(index: number): Address {
+    return this.derivePayInAccount(index).address;
+  }
+
+  routerInvoiceIdFromExternalId(externalId: string): `0x${string}` {
+    return keccak256(stringToBytes(externalId));
+  }
+
+  derivePayInAccount(index: number) {
     const mnemonic = this.configuration.payInMnemonic;
     if (!mnemonic) {
       throw new ServiceUnavailableException(
@@ -67,7 +81,7 @@ export class BlockchainService {
     return mnemonicToAccount(mnemonic, {
       accountIndex: this.configuration.payInDerivationAccount,
       addressIndex: index,
-    }).address;
+    });
   }
 
   toAtomicAmount(asset: SettlementAsset, amount: string): bigint {
@@ -105,6 +119,18 @@ export class BlockchainService {
     const balance = await this.publicClient.getBalance({
       address: treasuryAddress,
     });
+
+    return {
+      asset: 'AVAX',
+      balanceAtomic: balance.toString(),
+      balance: formatEther(balance),
+    };
+  }
+
+  async getNativeBalanceForAddress(
+    address: Address,
+  ): Promise<NativeTreasuryBalance> {
+    const balance = await this.publicClient.getBalance({ address });
 
     return {
       asset: 'AVAX',
@@ -186,6 +212,145 @@ export class BlockchainService {
       amount: formatUnits(log.args.value ?? 0n, assetConfig.decimals),
       blockNumber: log.blockNumber.toString(),
     }));
+  }
+
+  async findPaymentRouterInvoicePayments(input: {
+    asset: SettlementAsset;
+    invoiceId: `0x${string}`;
+    fromBlock: bigint;
+  }): Promise<PaymentRouterInvoicePayment[]> {
+    const routerAddress = this.configuration.paymentRouterAddress;
+    if (!routerAddress) {
+      throw new ServiceUnavailableException(
+        'AVASETTLE_PAYMENT_ROUTER_ADDRESS is not configured.',
+      );
+    }
+
+    const assetConfig = this.requireAsset(input.asset);
+    const latestBlock = await this.publicClient.getBlockNumber();
+    const configuredFromBlock =
+      input.fromBlock > 0n
+        ? input.fromBlock
+        : latestBlock - this.configuration.payInLookbackBlocks;
+    const fromBlock = configuredFromBlock > 0n ? configuredFromBlock : 0n;
+    const invoicePaidEvent = parseAbiItem(
+      'event InvoicePaid(bytes32 indexed invoiceId, address indexed payer, address indexed token, uint256 amount, address treasury, bytes metadata)',
+    );
+    const logs = await this.publicClient.getLogs({
+      address: routerAddress,
+      event: invoicePaidEvent,
+      args: {
+        invoiceId: input.invoiceId,
+        token: assetConfig.address,
+      },
+      fromBlock,
+      toBlock: 'latest',
+    });
+
+    return logs.map((log) => ({
+      hash: log.transactionHash,
+      invoiceId: log.args.invoiceId as `0x${string}`,
+      payer: log.args.payer as `0x${string}`,
+      from: log.args.payer as `0x${string}`,
+      to: log.args.treasury as `0x${string}`,
+      token: log.args.token as `0x${string}`,
+      treasury: log.args.treasury as `0x${string}`,
+      amountAtomic: (log.args.amount ?? 0n).toString(),
+      amount: formatUnits(log.args.amount ?? 0n, assetConfig.decimals),
+      blockNumber: log.blockNumber.toString(),
+    }));
+  }
+
+  async sweepDerivedPayIn(input: {
+    asset: SettlementAsset;
+    derivationIndex: number;
+    expectedAddress: Address;
+    amountAtomic?: bigint;
+  }): Promise<SweepExecution> {
+    if (input.derivationIndex < 0) {
+      throw new BadRequestException('Invalid pay-in derivation index.');
+    }
+
+    const treasuryAddress = this.requireTreasuryAddress();
+    const account = this.derivePayInAccount(input.derivationIndex);
+    if (getAddress(account.address) !== getAddress(input.expectedAddress)) {
+      throw new ConflictException(
+        'Derived signer does not match stored pay-in deposit address.',
+      );
+    }
+
+    const nativeBalance = await this.publicClient.getBalance({
+      address: account.address,
+    });
+    if (nativeBalance === 0n) {
+      throw new ConflictException(
+        'Derived deposit address has no AVAX for sweep gas.',
+      );
+    }
+
+    const assetConfig = this.requireAsset(input.asset);
+    const tokenBalance = await this.publicClient.readContract({
+      address: assetConfig.address,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [account.address],
+    });
+    const amountAtomic = input.amountAtomic ?? tokenBalance;
+    if (amountAtomic <= 0n) {
+      throw new ConflictException(
+        'Derived deposit address has no token balance.',
+      );
+    }
+    if (amountAtomic > tokenBalance) {
+      throw new ConflictException(
+        'Sweep amount exceeds deposit address balance.',
+      );
+    }
+
+    const walletClient = createWalletClient({
+      account,
+      chain: this.chain,
+      transport: http(this.configuration.networkSummary.rpcUrl),
+    });
+
+    await this.publicClient.simulateContract({
+      account,
+      address: assetConfig.address,
+      abi: erc20Abi,
+      functionName: 'transfer',
+      args: [treasuryAddress, amountAtomic],
+    });
+
+    const hash = await walletClient.writeContract({
+      address: assetConfig.address,
+      abi: erc20Abi,
+      functionName: 'transfer',
+      args: [treasuryAddress, amountAtomic],
+    });
+
+    if (!this.configuration.waitForReceipt) {
+      return {
+        hash,
+        status: 'broadcasted',
+        from: account.address,
+        to: treasuryAddress,
+        asset: input.asset,
+        amountAtomic: amountAtomic.toString(),
+        amount: formatUnits(amountAtomic, assetConfig.decimals),
+      };
+    }
+
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    return {
+      hash,
+      status: receipt.status === 'success' ? 'confirmed' : 'broadcasted',
+      blockNumber: receipt.blockNumber.toString(),
+      from: account.address,
+      to: treasuryAddress,
+      asset: input.asset,
+      amountAtomic: amountAtomic.toString(),
+      amount: formatUnits(amountAtomic, assetConfig.decimals),
+    };
   }
 
   async sendErc20Transfer(input: {

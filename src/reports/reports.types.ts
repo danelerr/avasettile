@@ -12,12 +12,20 @@ export type InstitutionalSummaryReport = {
   payins: {
     count: number;
     byStatus: ReportBucket;
+    byCollectionMode: ReportBucket;
+    bySweepStatus: ReportBucket;
     expectedVolumeByAsset: AssetVolume;
     receivedVolumeByAsset: AssetVolume;
+    sweptVolumeByAsset: AssetVolume;
   };
   settlements: {
     count: number;
     byStatus: ReportBucket;
     fiatVolumeByCurrency: AssetVolume;
+  };
+  privateSettlements: {
+    count: number;
+    byStatus: ReportBucket;
+    byMode: ReportBucket;
   };
 };

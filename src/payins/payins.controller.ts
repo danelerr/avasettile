@@ -23,6 +23,7 @@ import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
 import { RequestContext } from '../payouts/payout.types';
 import { CreatePayInDto } from './dto/create-payin.dto';
 import { ListPayInsQueryDto } from './dto/list-payins-query.dto';
+import { SweepPayInDto } from './dto/sweep-payin.dto';
 import { PayinsService } from './payins.service';
 
 const payInExample = {
@@ -41,6 +42,8 @@ const payInExample = {
   derivationIndex: 0,
   startBlock: '123456',
   transfers: [],
+  sweepStatus: 'pending',
+  sweepTransactionHash: null,
 };
 
 @ApiTags('payins')
@@ -112,6 +115,38 @@ export class PayinsController {
   ) {
     return this.payins.reconcilePayIn(
       id,
+      this.toRequestContext(headers, sourceIp),
+    );
+  }
+
+  @Post(':id/sweep')
+  @ApiOperation({
+    summary: 'Sweep a derived pay-in address into treasury',
+    description:
+      'Signs from the derived pay-in EOA and transfers its ERC-20 balance to the configured institutional treasury. PaymentRouter pay-ins settle directly to treasury and return not_required.',
+  })
+  @ApiParam({ name: 'id', example: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10' })
+  @ApiBody({ type: SweepPayInDto, required: false })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        ...payInExample,
+        status: 'confirmed',
+        sweepStatus: 'broadcasted',
+        sweepTransactionHash:
+          '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    },
+  })
+  sweepPayIn(
+    @Param('id') id: string,
+    @Body() dto: SweepPayInDto,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Ip() sourceIp: string,
+  ) {
+    return this.payins.sweepPayIn(
+      id,
+      dto ?? {},
       this.toRequestContext(headers, sourceIp),
     );
   }

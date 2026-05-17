@@ -47,6 +47,7 @@ export class HealthController {
         checks: {
           apiKeyConfigured: true,
           treasuryConfigured: false,
+          payInMnemonicConfigured: false,
           assetsConfigured: false,
           rpcReachable: true,
         },

@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { formatUnits } from 'viem';
@@ -12,8 +14,16 @@ import { ConfigurationService } from '../configuration/configuration.service';
 import { RequestContext } from '../payouts/payout.types';
 import { CreatePayInDto } from './dto/create-payin.dto';
 import { ListPayInsQueryDto } from './dto/list-payins-query.dto';
+import { SweepPayInDto } from './dto/sweep-payin.dto';
 import { PayInLedgerService } from './payin-ledger.service';
-import { PayInRecord, PayInResponse, PayInStatus } from './payins.types';
+import {
+  PayInCollectionMode,
+  PayInRecord,
+  PayInResponse,
+  PayInStatus,
+  PayInSweepStatus,
+  PayInTransferRecord,
+} from './payins.types';
 
 @Injectable()
 export class PayinsService {
@@ -38,10 +48,25 @@ export class PayinsService {
       dto.asset,
       dto.amount,
     );
-    const derivationIndex = this.ledger.nextDerivationIndex();
-    const depositAddress = this.blockchain.derivePayInAddress(derivationIndex);
+    const collectionMode =
+      dto.collectionMode ?? PayInCollectionMode.DerivedAddress;
+    const isRouterMode = collectionMode === PayInCollectionMode.PaymentRouter;
+    const derivationIndex = isRouterMode
+      ? -1
+      : this.ledger.nextDerivationIndex();
+    const routerAddress = isRouterMode
+      ? this.requirePaymentRouterAddress()
+      : null;
+    const routerInvoiceId = isRouterMode
+      ? (dto.routerInvoiceId ??
+        this.blockchain.routerInvoiceIdFromExternalId(dto.externalId))
+      : null;
+    const depositAddress: `0x${string}` =
+      routerAddress ?? this.blockchain.derivePayInAddress(derivationIndex);
     const startBlock = await this.blockchain.getLatestBlockNumber();
     const now = new Date();
+    const expirationMinutes =
+      dto.expiresInMinutes ?? this.configuration.payInDefaultExpirationMinutes;
     const record = this.ledger.create({
       id: randomUUID(),
       externalId: dto.externalId,
@@ -57,12 +82,23 @@ export class PayinsService {
       receivedAmountAtomic: '0',
       depositAddress,
       derivationIndex,
+      collectionMode,
+      routerAddress,
+      routerInvoiceId,
       startBlock: startBlock.toString(),
-      expiresAt: dto.expiresInMinutes
-        ? new Date(now.getTime() + dto.expiresInMinutes * 60_000).toISOString()
+      expiresAt: expirationMinutes
+        ? new Date(now.getTime() + expirationMinutes * 60_000).toISOString()
         : null,
       metadata: dto.metadata ?? {},
       transfers: [],
+      sweepStatus: isRouterMode
+        ? PayInSweepStatus.NotRequired
+        : PayInSweepStatus.Pending,
+      sweepTransactionHash: null,
+      sweptAmount: '0',
+      sweptAmountAtomic: '0',
+      sweptAt: null,
+      sweepFailureReason: null,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       detectedAt: null,
@@ -77,6 +113,8 @@ export class PayinsService {
         externalId: record.externalId,
         depositAddress: record.depositAddress,
         derivationIndex: record.derivationIndex,
+        collectionMode: record.collectionMode,
+        routerInvoiceId: record.routerInvoiceId,
         expectedAmount: record.expectedAmount,
         asset: record.asset,
       },
@@ -103,11 +141,7 @@ export class PayinsService {
     }
 
     const [transfers, latestBlock] = await Promise.all([
-      this.blockchain.findIncomingErc20Transfers({
-        asset: payin.asset,
-        to: payin.depositAddress,
-        fromBlock: BigInt(payin.startBlock),
-      }),
+      this.findPayInTransfers(payin),
       this.blockchain.getLatestBlockNumber(),
     ]);
     const totalReceivedAtomic = transfers.reduce(
@@ -174,10 +208,136 @@ export class PayinsService {
     return this.toResponse(updated);
   }
 
+  async sweepPayIn(
+    id: string,
+    dto: SweepPayInDto,
+    context: RequestContext,
+  ): Promise<PayInResponse> {
+    const payin = this.requirePayIn(id);
+    if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
+      const updated = this.ledger.update(id, {
+        sweepStatus: PayInSweepStatus.NotRequired,
+        sweepFailureReason: null,
+      });
+      if (!updated) throw new ConflictException('Unable to update pay-in.');
+      return this.toResponse(updated, true);
+    }
+
+    if (payin.sweepStatus === PayInSweepStatus.Broadcasted) {
+      return this.toResponse(payin, true);
+    }
+    if (payin.sweepStatus === PayInSweepStatus.Confirmed) {
+      return this.toResponse(payin, true);
+    }
+
+    const amountAtomic = dto.amount
+      ? this.blockchain.toAtomicAmount(payin.asset, dto.amount)
+      : undefined;
+
+    try {
+      const sweep = await this.blockchain.sweepDerivedPayIn({
+        asset: payin.asset,
+        derivationIndex: payin.derivationIndex,
+        expectedAddress: payin.depositAddress,
+        amountAtomic,
+      });
+      const sweepStatus =
+        sweep.status === 'confirmed'
+          ? PayInSweepStatus.Confirmed
+          : PayInSweepStatus.Broadcasted;
+      const updated = this.ledger.update(id, {
+        sweepStatus,
+        sweepTransactionHash: sweep.hash,
+        sweptAmount: sweep.amount,
+        sweptAmountAtomic: sweep.amountAtomic,
+        sweptAt: new Date().toISOString(),
+        sweepFailureReason: null,
+      });
+      if (!updated) throw new ConflictException('Unable to update pay-in.');
+
+      this.audit.record({
+        type: 'PAYIN_SWEPT',
+        subjectId: id,
+        actor: this.toAuditActor(context),
+        payload: {
+          transactionHash: sweep.hash,
+          from: sweep.from,
+          to: sweep.to,
+          amount: sweep.amount,
+          amountAtomic: sweep.amountAtomic,
+          notes: dto.notes ?? null,
+        },
+      });
+
+      return this.toResponse(updated);
+    } catch (error) {
+      const failureReason =
+        error instanceof Error ? error.message : 'Unknown sweep failure.';
+      const failed = this.ledger.update(id, {
+        sweepStatus: PayInSweepStatus.Failed,
+        sweepFailureReason: failureReason,
+      });
+
+      this.audit.record({
+        type: 'PAYIN_SWEEP_FAILED',
+        subjectId: id,
+        actor: this.toAuditActor(context),
+        payload: { failureReason, notes: dto.notes ?? null },
+      });
+
+      if (failed) return this.toResponse(failed);
+      throw error;
+    }
+  }
+
+  private async findPayInTransfers(
+    payin: PayInRecord,
+  ): Promise<PayInTransferRecord[]> {
+    if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
+      if (!payin.routerInvoiceId) {
+        throw new BadRequestException('Router pay-in has no invoice id.');
+      }
+
+      return this.blockchain
+        .findPaymentRouterInvoicePayments({
+          asset: payin.asset,
+          invoiceId: payin.routerInvoiceId,
+          fromBlock: BigInt(payin.startBlock),
+        })
+        .then((payments) =>
+          payments.map((payment) => ({
+            hash: payment.hash,
+            from: payment.from,
+            to: payment.to,
+            amount: payment.amount,
+            amountAtomic: payment.amountAtomic,
+            blockNumber: payment.blockNumber,
+          })),
+        );
+    }
+
+    return this.blockchain.findIncomingErc20Transfers({
+      asset: payin.asset,
+      to: payin.depositAddress,
+      fromBlock: BigInt(payin.startBlock),
+    });
+  }
+
   private requirePayIn(id: string): PayInRecord {
     const payin = this.ledger.findById(id);
     if (!payin) throw new NotFoundException('Pay-in not found.');
     return payin;
+  }
+
+  private requirePaymentRouterAddress(): `0x${string}` {
+    const address = this.configuration.paymentRouterAddress;
+    if (!address) {
+      throw new ServiceUnavailableException(
+        'AVASETTLE_PAYMENT_ROUTER_ADDRESS is required for payment-router pay-ins.',
+      );
+    }
+
+    return address;
   }
 
   private toResponse(

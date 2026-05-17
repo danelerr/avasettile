@@ -1,37 +1,46 @@
-# AvaSettle On-chain Provider
+# AvaSettle Institutional Stablecoin Payments API
 
-NestJS backend module for AvaSettle, the Avalanche on-chain provider consumed by Chain Flow or another institutional orchestrator.
+NestJS backend for AvaSettle, an institutional B2B API for stablecoin pay-ins, reconciliation, treasury sweep, settlement, and payouts on Avalanche.
 
-This service is intentionally isolated from the existing Parmelia Worker and is not part of the Parmelia pnpm workspace. Parmelia keeps its current `server/`, `client/`, `shared/` and `contracts/` flows; `avasettle/` adds a B2B provider API for stablecoin payouts on Avalanche.
+Chain Flow is one enterprise integration example. AvaSettle is not a Chain Flow plugin and is not a retail wallet. It is infrastructure that PSPs, fintechs, remittance companies, banks, and merchants can integrate to receive USDC, reconcile invoices, move funds into treasury, and execute outbound disbursements.
+
+This service is intentionally isolated from the existing Parmelia Worker and is not part of the Parmelia pnpm workspace. Parmelia keeps its current `server/`, `client/`, `shared/` and `contracts/` flows; `avasettle/` adds an independent B2B provider API.
 
 ## Scope
 
 - Validates B2B calls with `x-avasettle-api-key` or `Authorization: Bearer`.
-- Prepares idempotent payout intents from Chain Flow.
-- Authorizes and broadcasts ERC-20 treasury transfers with `viem`.
+- Creates pay-ins so customers of institutions can pay in USDC.
 - Creates real EVM pay-in deposit addresses from a configured mnemonic.
+- Optionally creates programmable PaymentRouter invoices.
 - Scans ERC-20 `Transfer` logs to reconcile pay-ins.
+- Sweeps funds from derived deposit addresses into institutional treasury.
+- Confirms to the institution that an invoice/customer payment was received.
+- Authorizes and broadcasts ERC-20 treasury payouts with `viem`.
 - Reconciles transaction receipts and confirmation depth.
 - Exposes treasury status and balances.
 - Records a JSON-file ledger and audit trail behind a repository boundary.
-- Provides reports, mock risk scoring, and simulated fiat settlement.
+- Provides reports, mock risk scoring, simulated fiat settlement, and experimental private settlement receipts.
 
 The current ledger persists to `AVASETTLE_STORAGE_FILE`, defaulting to `data/avasettle-ledger.json`. This is intentionally simple for the hackathon; `StorageService`, `PayoutLedgerService`, and `PayInLedgerService` are the replacement points for Postgres, D1, DynamoDB or another durable ledger.
 
-## Foundry And Smart Contracts
+## Smart Contracts
 
-This backend does not include Foundry or new Solidity contracts by design.
+This iteration includes a minimal Foundry project for `PaymentRouter.sol`:
 
-AvaSettle, in its current on-chain provider scope, does not deploy protocol contracts. It signs and broadcasts ERC-20 `transfer` calls from an institutional treasury wallet to a beneficiary address on Avalanche C-Chain. That means the only contract interface needed for the first version is the standard ERC-20 ABI used through `viem`.
+```txt
+contracts/src/PaymentRouter.sol
+foundry.toml
+```
 
-This is acceptable for the hackathon backend if the target flow is:
+`PaymentRouter` is an optional Avalanche-native invoice rail. It uses OpenZeppelin `Ownable`, `Pausable`, `ReentrancyGuard`, and `SafeERC20`. A payer approves USDC to the router, calls `payInvoice`, and the contract transfers funds directly to the configured treasury while emitting an `InvoicePaid` event that AvaSettle can reconcile.
 
-1. Chain Flow creates and approves a payout request.
-2. AvaSettle validates the request and treasury policy.
-3. AvaSettle transfers an already-existing stablecoin token, such as USDC or USDT, on Avalanche.
-4. AvaSettle reconciles the resulting transaction hash.
+Compile contracts from `avasettle/`:
 
-Add Foundry and Solidity later if the product needs custom escrow, batch settlement, multi-sig vaults, programmable limits, institution-specific settlement contracts, or on-chain attestations. Until then, adding contracts would increase scope without improving the payout provider MVP.
+```bash
+pnpm contracts:build
+```
+
+The default pay-in mode still uses derived EVM deposit addresses. PaymentRouter is optional and enabled only when `AVASETTLE_PAYMENT_ROUTER_ADDRESS` is configured.
 
 ## Commands
 
@@ -48,27 +57,183 @@ pnpm test:e2e
 
 ## Environment
 
-Copy `.env.example` into a local `.env` file and configure:
+Copy `.env.example` into a local `.env` file and configure it from inside `avasettle/`:
 
 ```bash
 PORT=3001
-AVASETTLE_API_KEY=change-me
+NODE_ENV=development
+AVASETTLE_API_KEY=pon-una-key-generada
 AVASETTLE_NETWORK=avalanche-fuji
 AVASETTLE_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
+AVASETTLE_EXPLORER_BASE_URL=https://subnets-test.avax.network/c-chain
 AVASETTLE_STORAGE_FILE=data/avasettle-ledger.json
 AVASETTLE_TREASURY_PRIVATE_KEY=0x...
-AVASETTLE_PAYIN_MNEMONIC=
+AVASETTLE_PAYIN_MNEMONIC="..."
+AVASETTLE_PAYIN_DERIVATION_ACCOUNT=0
+AVASETTLE_PAYIN_LOOKBACK_BLOCKS=50000
+AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES=30
+AVASETTLE_PAYMENT_ROUTER_ADDRESS=
 AVASETTLE_ENABLED_ASSETS=USDC
-AVASETTLE_USDC_ADDRESS=0x...
+AVASETTLE_USDC_ADDRESS=0x5425890298aed601595a70AB815c96711a31Bc65
 AVASETTLE_USDC_DECIMALS=6
 AVASETTLE_MAX_PAYOUT_USDC=1000
-AVASETTLE_SETTLEMENT_FIAT_CURRENCY=USD
-AVASETTLE_SETTLEMENT_FIAT_RATE=1
+AVASETTLE_MIN_CONFIRMATIONS=2
+AVASETTLE_WAIT_FOR_RECEIPT=false
+AVASETTLE_CORS_ORIGINS=*
+AVASETTLE_RISK_REVIEW_AMOUNT=10000
+AVASETTLE_RISK_REJECT_AMOUNT=50000
+AVASETTLE_SETTLEMENT_FIAT_CURRENCY=BOB
+AVASETTLE_SETTLEMENT_FIAT_RATE=10
+AVASETTLE_PRIVACY_MODE=off
+AVASETTLE_EERC_CONTRACT_ADDRESS=
 ```
+
+How to obtain each value for a Fuji demo:
+
+| Variable | How to get it |
+| --- | --- |
+| `PORT` | Use `3001` locally. Cloud Run injects `PORT`, usually `8080`, so do not hardcode it in deployment. |
+| `AVASETTLE_API_KEY` | Generate a shared B2B demo secret, for example `openssl rand -hex 32`. Chain Flow must send it as `x-avasettle-api-key` or `Authorization: Bearer <key>`. |
+| `AVASETTLE_NETWORK` | Use `avalanche-fuji` for the hackathon demo. |
+| `AVASETTLE_RPC_URL` | Use Avalanche Fuji C-Chain RPC `https://api.avax-test.network/ext/bc/C/rpc`, or a dedicated provider RPC if the demo needs higher reliability. |
+| `AVASETTLE_EXPLORER_BASE_URL` | Use `https://subnets-test.avax.network/c-chain` for Fuji transaction inspection. |
+| `AVASETTLE_STORAGE_FILE` | Use `data/avasettle-ledger.json` locally. On Cloud Run demos use `/tmp/avasettle-ledger.json`; this is ephemeral and must be replaced by a database for production. |
+| `AVASETTLE_TREASURY_PRIVATE_KEY` | Create a dedicated demo EVM wallet, export only that demo private key, fund it with Fuji AVAX for gas and Fuji USDC for payouts. Do not use a personal wallet or mainnet key. |
+| `AVASETTLE_PAYIN_MNEMONIC` | Generate a separate demo mnemonic dedicated to pay-in deposit address derivation. It controls funds sent to derived addresses. |
+| `AVASETTLE_PAYIN_DERIVATION_ACCOUNT` | Keep `0` unless you intentionally want another HD account branch. |
+| `AVASETTLE_PAYIN_LOOKBACK_BLOCKS` | Keep `50000` for demos. Increase only if reconciling old pay-ins. |
+| `AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES` | Default expiration for pay-in requests when the API request does not send `expiresInMinutes`. |
+| `AVASETTLE_PAYMENT_ROUTER_ADDRESS` | Optional deployed `PaymentRouter` contract address. Required only for `collectionMode=payment-router`. |
+| `AVASETTLE_ENABLED_ASSETS` | Use `USDC` for the Fuji demo unless USDT is also configured. |
+| `AVASETTLE_USDC_ADDRESS` | Fuji USDC contract address from Circle docs: `0x5425890298aed601595a70AB815c96711a31Bc65`. |
+| `AVASETTLE_USDC_DECIMALS` | Use `6` for USDC. |
+| `AVASETTLE_MAX_PAYOUT_USDC` | Demo treasury policy limit. Keep low, for example `1000`. |
+| `AVASETTLE_MIN_CONFIRMATIONS` | Minimum confirmation depth before reconciliation marks a transfer final. Use `2` for demo. |
+| `AVASETTLE_WAIT_FOR_RECEIPT` | Use `false` for fast authorization demos that return a `txHash` immediately; use `true` if the API should wait for a receipt. |
+| `AVASETTLE_CORS_ORIGINS` | Use `*` for hackathon demos, or a comma-separated list of Chain Flow/frontend origins. |
+| `AVASETTLE_RISK_REVIEW_AMOUNT` | Mock risk threshold that returns review. |
+| `AVASETTLE_RISK_REJECT_AMOUNT` | Mock risk threshold that rejects before payout creation. |
+| `AVASETTLE_SETTLEMENT_FIAT_CURRENCY` | Simulated settlement fiat currency, for example `BOB`, `COP`, `MXN`, or `USD`. |
+| `AVASETTLE_SETTLEMENT_FIAT_RATE` | Demo conversion rate used by simulated settlements. |
+| `AVASETTLE_PRIVACY_MODE` | `off`, `metadata-redaction`, or `eerc-experimental`. Experimental privacy endpoints reject requests while this is `off`. |
+| `AVASETTLE_EERC_CONTRACT_ADDRESS` | Optional eERC/private-settlement contract address. Required only for `eerc-experimental` receipts. |
 
 Do not rely on default token addresses for production. Configure the exact stablecoin contract used by the institution and selected Avalanche network.
 
 Do not configure pay-ins with a throwaway mnemonic in production. `AVASETTLE_PAYIN_MNEMONIC` derives real EVM addresses, so it controls funds received at those addresses.
+
+## Fuji Demo Flow
+
+Start locally:
+
+```bash
+cd avasettle
+pnpm install
+pnpm start:dev
+```
+
+Check readiness:
+
+```bash
+pnpm demo:health
+```
+
+Prepare a Chain Flow withdrawal with the exact provider payload:
+
+```bash
+DEMO_EXTERNAL_ID=EXT-0001 \
+DEMO_AMOUNT=10 \
+DEMO_TO_ADDRESS=0x1111111111111111111111111111111111111111 \
+pnpm demo:chainflow:prepare
+```
+
+Authorize and broadcast the ERC-20 payout:
+
+```bash
+DEMO_EXTERNAL_ID=EXT-0001 pnpm demo:chainflow:authorize
+```
+
+The response should include `txHash` once the treasury wallet is funded with AVAX and USDC on Fuji.
+
+Consult status:
+
+```bash
+DEMO_EXTERNAL_ID=EXT-0001 pnpm demo:chainflow:status
+```
+
+Create a real pay-in deposit address:
+
+```bash
+PAYIN_EXTERNAL_ID=PAYIN-DEMO-0001 PAYIN_AMOUNT=10 pnpm demo:payin:create
+```
+
+Send Fuji USDC to the returned `depositAddress`, then reconcile:
+
+```bash
+PAYIN_ID=<id returned by create> pnpm demo:payin:reconcile
+```
+
+Sweep the derived pay-in address into treasury. The derived address must hold Fuji AVAX for gas:
+
+```bash
+PAYIN_ID=<id returned by create> pnpm demo:payin:sweep
+```
+
+Create a programmable PaymentRouter invoice instead of a derived address:
+
+```bash
+AVASETTLE_PAYMENT_ROUTER_ADDRESS=0x... \
+PAYIN_EXTERNAL_ID=ROUTER-INVOICE-0001 \
+PAYIN_AMOUNT=10 \
+pnpm demo:router:invoice
+```
+
+The response includes `routerInvoiceId` and `depositAddress` equal to the router contract. The payer must approve the router for USDC and call `payInvoice(routerInvoiceId, USDC, amountAtomic, metadata)`.
+
+Create an experimental private settlement receipt:
+
+```bash
+AVASETTLE_PRIVACY_MODE=metadata-redaction pnpm demo:privacy:create
+```
+
+Review institutional summary:
+
+```bash
+pnpm demo:reports
+```
+
+## Deploy To Cloud Run
+
+`Dockerfile` is included for a container-based deployment. Cloud Run injects the `PORT` environment variable into the ingress container, and AvaSettle already reads `PORT` through `ConfigurationService`.
+
+For a hackathon/free-tier style deployment, keep minimum instances at `0`, use Fuji, keep payout limits low, and store secrets in Secret Manager. Cloud Run's filesystem is ephemeral, so `AVASETTLE_STORAGE_FILE=/tmp/avasettle-ledger.json` is acceptable only for a demo. Use a durable database before production or any real institutional pilot.
+
+Create secrets:
+
+```bash
+printf '%s' "$AVASETTLE_API_KEY" | gcloud secrets create avasettle-api-key --data-file=-
+printf '%s' "$AVASETTLE_TREASURY_PRIVATE_KEY" | gcloud secrets create avasettle-treasury-private-key --data-file=-
+printf '%s' "$AVASETTLE_PAYIN_MNEMONIC" | gcloud secrets create avasettle-payin-mnemonic --data-file=-
+```
+
+Deploy from inside `avasettle/`:
+
+```bash
+gcloud run deploy avasettle \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --min-instances 0 \
+  --set-env-vars NODE_ENV=production,AVASETTLE_NETWORK=avalanche-fuji,AVASETTLE_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc,AVASETTLE_EXPLORER_BASE_URL=https://subnets-test.avax.network/c-chain,AVASETTLE_STORAGE_FILE=/tmp/avasettle-ledger.json,AVASETTLE_ENABLED_ASSETS=USDC,AVASETTLE_USDC_ADDRESS=0x5425890298aed601595a70AB815c96711a31Bc65,AVASETTLE_USDC_DECIMALS=6,AVASETTLE_MAX_PAYOUT_USDC=1000,AVASETTLE_MIN_CONFIRMATIONS=2,AVASETTLE_WAIT_FOR_RECEIPT=false,AVASETTLE_CORS_ORIGINS=*,AVASETTLE_PRIVACY_MODE=off \
+  --set-secrets AVASETTLE_API_KEY=avasettle-api-key:latest,AVASETTLE_TREASURY_PRIVATE_KEY=avasettle-treasury-private-key:latest,AVASETTLE_PAYIN_MNEMONIC=avasettle-payin-mnemonic:latest
+```
+
+After deployment:
+
+```bash
+API_BASE_URL=https://<cloud-run-url> pnpm demo:health
+API_BASE_URL=https://<cloud-run-url> DEMO_EXTERNAL_ID=EXT-0001 pnpm demo:chainflow:prepare
+```
 
 ## Swagger / OpenAPI
 
@@ -270,7 +435,31 @@ Chain Flow should call this endpoint after broadcast or run it from a scheduled 
 
 Protected Chain Flow compatibility endpoint.
 
-It accepts provider-style withdrawal payloads using Spanish or modern field names and maps them to `POST /v1/payouts`. Supported aliases include:
+It accepts the exact Chain Flow withdrawal payload and maps it to `POST /v1/payouts`.
+
+Exact payload expected by Chain Flow:
+
+```json
+{
+  "tcTransaccionExterna": "EXT-0001",
+  "tnMonto": 10,
+  "tnMoneda": 1,
+  "tcCuentaDestino": "0x1111111111111111111111111111111111111111",
+  "tnRetiroPago": 12345,
+  "tnTransferenciaBloque": 9001,
+  "tnProcesadorPagos": 3
+}
+```
+
+Mapping rules:
+
+- `tcTransaccionExterna` becomes AvaSettle `externalId` and is the preferred idempotency key.
+- `tnMonto` becomes the payout amount.
+- `tnMoneda=1` maps to `USDC`; `tnMoneda=2` maps to `USDT`.
+- `tcCuentaDestino` becomes the beneficiary EVM address.
+- `tnRetiroPago`, `tnTransferenciaBloque`, `tnProcesadorPagos`, `tnMoneda`, and `tcCuentaDestino` are persisted under `metadata.chainFlow` for audit and status lookup.
+
+The endpoint also keeps the previous aliases for compatibility:
 
 - `idRetiro`, `id_retiro`, or `externalId`;
 - `monto` or `amount`;
@@ -283,11 +472,19 @@ Example:
 
 ```json
 {
-  "idRetiro": "cf-retiro-0001",
-  "monto": "25.50",
-  "moneda": "USDC",
-  "wallet": "0x1111111111111111111111111111111111111111",
-  "beneficiario": "Cliente LATAM"
+  "codigo": "00",
+  "mensaje": "Retiro preparado.",
+  "tcTransaccionExterna": "EXT-0001",
+  "tnRetiroPago": 12345,
+  "tnTransferenciaBloque": 9001,
+  "tnProcesadorPagos": 3,
+  "tnMoneda": 1,
+  "tcCuentaDestino": "0x1111111111111111111111111111111111111111",
+  "retiroId": "EXT-0001",
+  "payoutId": "7b4d9f4d-74a8-4e20-91b7-b8dd3af46177",
+  "estado": "prepared",
+  "estadoChainFlow": "PREPARADO",
+  "txHash": null
 }
 ```
 
@@ -295,13 +492,13 @@ Example:
 
 Protected Chain Flow compatibility endpoint.
 
-It locates a prepared payout by `payoutId`, `externalId`, `idRetiro`, or `id_retiro`, then calls the same authorization/broadcast path used by `POST /v1/payouts/:id/authorize`.
+It locates a prepared payout by `payoutId`, `tcTransaccionExterna`, `externalId`, `idRetiro`, `id_retiro`, `tnRetiroPago`, or `tnTransferenciaBloque`, then calls the same authorization/broadcast path used by `POST /v1/payouts/:id/authorize`.
 
 Example:
 
 ```json
 {
-  "idRetiro": "cf-retiro-0001"
+  "tcTransaccionExterna": "EXT-0001"
 }
 ```
 
@@ -309,10 +506,10 @@ Example:
 
 Protected Chain Flow compatibility endpoint.
 
-It returns a provider-style status response for a payout. Query by `payoutId`, `externalId`, `idRetiro`, or `id_retiro`.
+It returns a provider-style status response for a payout. Query by `payoutId`, `tcTransaccionExterna`, `externalId`, `idRetiro`, `id_retiro`, `tnRetiroPago`, or `tnTransferenciaBloque`.
 
 ```http
-GET /api/consultarestadoretiro?idRetiro=cf-retiro-0001
+GET /api/consultarestadoretiro?tcTransaccionExterna=EXT-0001
 ```
 
 ### `POST /api/consultarestadoretiro`
@@ -325,21 +522,35 @@ Same behavior as the GET variant, but accepts a JSON body for providers/orchestr
 
 Protected pay-in creation endpoint.
 
-It derives a real EVM deposit address from `AVASETTLE_PAYIN_MNEMONIC` using an incrementing derivation index, stores the expected amount, and records the current Avalanche block as the scan start. It does not use mock addresses or a PaymentRouter contract.
+By default it derives a real EVM deposit address from `AVASETTLE_PAYIN_MNEMONIC` using an incrementing derivation index, stores the expected amount, and records the current Avalanche block as the scan start.
 
 If `AVASETTLE_PAYIN_MNEMONIC` is not configured, this endpoint returns a service configuration error.
+
+For programmable invoices, set `collectionMode` to `payment-router`. That mode requires `AVASETTLE_PAYMENT_ROUTER_ADDRESS`; AvaSettle returns a `routerInvoiceId` and uses `PaymentRouter.InvoicePaid` events for reconciliation.
 
 Example:
 
 ```json
 {
-  "externalId": "chainflow-payin-0001",
+  "externalId": "merchant-invoice-0001",
   "asset": "USDC",
   "amount": "100.00",
+  "collectionMode": "derived-address",
   "expiresInMinutes": 60,
   "metadata": {
     "country": "BO"
   }
+}
+```
+
+PaymentRouter example:
+
+```json
+{
+  "externalId": "merchant-router-invoice-0001",
+  "asset": "USDC",
+  "amount": "100.00",
+  "collectionMode": "payment-router"
 }
 ```
 
@@ -359,7 +570,9 @@ Returns deposit address, derivation index, expected amount, received amount, sta
 
 Protected pay-in reconciliation endpoint.
 
-It scans ERC-20 `Transfer` logs for the configured token contract where `to` equals the derived deposit address. It updates:
+For derived-address pay-ins, it scans ERC-20 `Transfer` logs for the configured token contract where `to` equals the derived deposit address. For PaymentRouter pay-ins, it scans `InvoicePaid` events matching `routerInvoiceId`.
+
+It updates:
 
 - `pending` when no transfer is found;
 - `detected` when the exact amount is found but confirmation depth is not enough;
@@ -367,6 +580,23 @@ It scans ERC-20 `Transfer` logs for the configured token contract where `to` equ
 - `underpaid` when some funds arrive but less than expected;
 - `overpaid` when more than expected arrives;
 - `expired` when no funds arrive before expiration.
+
+### `POST /v1/payins/:id/sweep`
+
+Protected treasury sweep endpoint.
+
+For derived-address pay-ins, it derives the signer for the stored `derivationIndex` and transfers the ERC-20 balance from `depositAddress` to the institutional treasury. The deposit address must have AVAX for gas. The endpoint stores `sweepStatus`, `sweepTransactionHash`, `sweptAmount`, and audit events.
+
+PaymentRouter pay-ins settle directly to treasury, so this endpoint returns `sweepStatus=not_required`.
+
+Optional body:
+
+```json
+{
+  "notes": "Sweep confirmed invoice",
+  "amount": "100.00"
+}
+```
 
 ### `POST /v1/reconciliation/run`
 
@@ -410,6 +640,25 @@ Protected risk scoring endpoint.
 
 Runs the encapsulated mock risk model for a payout, pay-in, or address. This is the integration point for a future Wavy Node provider.
 
+### `POST /v1/privacy/settlements`
+
+Protected experimental private settlement endpoint.
+
+Creates a privacy receipt using hashed commitments for amount, metadata, and counterparty. It supports:
+
+- `metadata-redaction`: stores a public amount but hashes metadata/counterparty.
+- `eerc-experimental`: stores commitments only and requires `AVASETTLE_EERC_CONTRACT_ADDRESS`.
+
+This module is intentionally experimental. It does not yet submit an eERC transaction; it encapsulates the API boundary for a future private settlement rail.
+
+### `GET /v1/privacy/settlements`
+
+Lists experimental private settlement receipts.
+
+### `GET /v1/privacy/settlements/:id`
+
+Returns one experimental private settlement receipt.
+
 ## Payout Statuses
 
 - `prepared`: request validated and stored, but not sent on-chain.
@@ -427,11 +676,29 @@ Runs the encapsulated mock risk model for a payout, pay-in, or address. This is 
 - `overpaid`: received more than expected.
 - `expired`: expiration reached without funds.
 
+## Pay-In Sweep Statuses
+
+- `pending`: derived address has not been swept yet.
+- `broadcasted`: sweep transaction hash exists.
+- `confirmed`: sweep transaction reached receipt confirmation when `AVASETTLE_WAIT_FOR_RECEIPT=true`.
+- `failed`: sweep attempt failed, usually because the deposit address has no AVAX for gas.
+- `not_required`: PaymentRouter pay-in settled directly to treasury.
+
 ## Operational Notes
 
 - Use a dedicated treasury hot wallet with limited funds for demos.
 - Use a dedicated pay-in mnemonic and protect it like production key material.
+- Derived pay-in addresses need AVAX before they can sweep ERC-20 funds.
+- PaymentRouter avoids per-address sweep gas by transferring payer funds directly to treasury.
 - Keep token contract addresses explicit per network and institution.
 - Rotate `AVASETTLE_API_KEY` before shared demos.
 - Replace the JSON ledger before production.
 - Add transaction policy checks before supporting mainnet volume.
+
+## References
+
+- Avalanche Fuji network parameters: `https://build.avax.network/docs/quick-start/networks/fuji-testnet`
+- Circle USDC contract addresses: `https://developers.circle.com/stablecoins/usdc-contract-addresses`
+- NestJS OpenAPI integration: `https://docs.nestjs.com/openapi/introduction`
+- Cloud Run container runtime contract: `https://cloud.google.com/run/docs/container-contract`
+- Cloud Run source deployment: `https://cloud.google.com/run/docs/deploying-source-code`

@@ -57,7 +57,8 @@ export class ConfigurationService {
         chainId: 43114,
         name: 'Avalanche C-Chain',
         nativeTokenSymbol: 'AVAX',
-        explorerBaseUrl: 'https://snowtrace.io',
+        explorerBaseUrl:
+          process.env.AVASETTLE_EXPLORER_BASE_URL ?? 'https://snowtrace.io',
         rpcUrl:
           process.env.AVASETTLE_RPC_URL ??
           'https://api.avax.network/ext/bc/C/rpc',
@@ -69,7 +70,9 @@ export class ConfigurationService {
       chainId: 43113,
       name: 'Avalanche Fuji Testnet',
       nativeTokenSymbol: 'AVAX',
-      explorerBaseUrl: 'https://testnet.snowtrace.io',
+      explorerBaseUrl:
+        process.env.AVASETTLE_EXPLORER_BASE_URL ??
+        'https://subnets-test.avax.network/c-chain',
       rpcUrl:
         process.env.AVASETTLE_RPC_URL ??
         'https://api.avax-test.network/ext/bc/C/rpc',
@@ -116,6 +119,51 @@ export class ConfigurationService {
 
   get payInLookbackBlocks(): bigint {
     return BigInt(this.readInt('AVASETTLE_PAYIN_LOOKBACK_BLOCKS', 50_000));
+  }
+
+  get payInDefaultExpirationMinutes(): number | null {
+    const value = process.env.AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES;
+    if (value === undefined || value === '') return null;
+
+    const minutes = this.readInt(
+      'AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES',
+      0,
+    );
+    if (minutes === 0) return null;
+    if (minutes > 10_080) {
+      throw new Error(
+        'AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES must be 10080 or lower.',
+      );
+    }
+
+    return minutes;
+  }
+
+  get paymentRouterAddress(): `0x${string}` | null {
+    return this.readAddress('AVASETTLE_PAYMENT_ROUTER_ADDRESS');
+  }
+
+  get paymentRouterConfigured(): boolean {
+    return this.paymentRouterAddress !== null;
+  }
+
+  get privacyMode(): 'off' | 'metadata-redaction' | 'eerc-experimental' {
+    const value = process.env.AVASETTLE_PRIVACY_MODE ?? 'off';
+    if (
+      value === 'off' ||
+      value === 'metadata-redaction' ||
+      value === 'eerc-experimental'
+    ) {
+      return value;
+    }
+
+    throw new Error(
+      'AVASETTLE_PRIVACY_MODE must be off, metadata-redaction or eerc-experimental.',
+    );
+  }
+
+  get eercContractAddress(): `0x${string}` | null {
+    return this.readAddress('AVASETTLE_EERC_CONTRACT_ADDRESS');
   }
 
   get fiatSettlementCurrency(): string {

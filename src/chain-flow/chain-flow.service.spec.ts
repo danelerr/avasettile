@@ -1,6 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { CreatePayoutDto } from '../payouts/dto/create-payout.dto';
 import { PayoutsService } from '../payouts/payouts.service';
+import { RequestContext } from '../payouts/payout.types';
 import { RiskService } from '../risk/risk.service';
 import { ChainFlowService } from './chain-flow.service';
 
@@ -36,6 +38,7 @@ describe('ChainFlowService', () => {
     authorizePayout: jest.fn(),
     getPayout: jest.fn(),
     getPayoutByExternalId: jest.fn(),
+    listPayouts: jest.fn(),
   };
   const risk = {
     assess: jest.fn(),
@@ -61,6 +64,7 @@ describe('ChainFlowService', () => {
         '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
     payouts.getPayoutByExternalId.mockReturnValue(payout);
+    payouts.listPayouts.mockReturnValue([payout]);
   });
 
   it('maps preparar retiro aliases to a payout request', async () => {
@@ -92,6 +96,104 @@ describe('ChainFlowService', () => {
     expect(response).toMatchObject({
       codigo: '00',
       retiroId: 'cf-retiro-1',
+      estado: 'prepared',
+      estadoChainFlow: 'PREPARADO',
+    });
+  });
+
+  it('maps the exact Chain Flow retiro payload to a payout request', async () => {
+    payouts.createPayout.mockResolvedValueOnce({
+      ...payout,
+      externalId: 'EXT-0001',
+      chainFlowRequestId: '12345',
+      amount: '10',
+      asset: 'USDC',
+      beneficiaryAddress: '0x1111111111111111111111111111111111111111',
+      metadata: {
+        source: 'chain-flow-compat',
+        chainFlow: {
+          tcTransaccionExterna: 'EXT-0001',
+          tnRetiroPago: 12345,
+          tnTransferenciaBloque: 9001,
+          tnProcesadorPagos: 3,
+          tnMoneda: 1,
+          tcCuentaDestino: '0x1111111111111111111111111111111111111111',
+        },
+      },
+    });
+
+    const response = await service.prepararRetiro(
+      {
+        tcTransaccionExterna: 'EXT-0001',
+        tnMonto: 10,
+        tnMoneda: 1,
+        tcCuentaDestino: '0x1111111111111111111111111111111111111111',
+        tnRetiroPago: 12345,
+        tnTransferenciaBloque: 9001,
+        tnProcesadorPagos: 3,
+      },
+      {
+        institutionId: 'chain-flow',
+        correlationId: 'EXT-0001',
+        idempotencyKey: 'EXT-0001',
+        actor: 'chain-flow',
+        sourceIp: null,
+      },
+    );
+
+    const [[createdDto]] = payouts.createPayout.mock.calls as [
+      [CreatePayoutDto, RequestContext],
+    ];
+    expect(createdDto).toMatchObject({
+      externalId: 'EXT-0001',
+      amount: '10',
+      asset: 'USDC',
+      beneficiaryAddress: '0x1111111111111111111111111111111111111111',
+      chainFlowRequestId: '12345',
+    });
+    expect(createdDto.metadata).toMatchObject({
+      source: 'chain-flow-compat',
+      chainFlow: {
+        tcTransaccionExterna: 'EXT-0001',
+        tnRetiroPago: 12345,
+        tnTransferenciaBloque: 9001,
+        tnProcesadorPagos: 3,
+        tnMoneda: 1,
+        tcCuentaDestino: '0x1111111111111111111111111111111111111111',
+      },
+    });
+    expect(response).toMatchObject({
+      codigo: '00',
+      tcTransaccionExterna: 'EXT-0001',
+      tnRetiroPago: 12345,
+      tnTransferenciaBloque: 9001,
+      tnProcesadorPagos: 3,
+      tnMoneda: 1,
+      retiroId: 'EXT-0001',
+      estadoChainFlow: 'PREPARADO',
+    });
+  });
+
+  it('can resolve status by Chain Flow retiro payment id metadata', () => {
+    const metadataPayout = {
+      ...payout,
+      externalId: 'EXT-0001',
+      metadata: {
+        chainFlow: {
+          tcTransaccionExterna: 'EXT-0001',
+          tnRetiroPago: 12345,
+        },
+      },
+    };
+    payouts.getPayoutByExternalId.mockReturnValueOnce(null);
+    payouts.listPayouts.mockReturnValueOnce([metadataPayout]);
+
+    const response = service.consultarEstadoRetiro({ tnRetiroPago: 12345 });
+
+    expect(response).toMatchObject({
+      codigo: '00',
+      tcTransaccionExterna: 'EXT-0001',
+      tnRetiroPago: 12345,
       estado: 'prepared',
     });
   });

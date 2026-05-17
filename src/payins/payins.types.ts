@@ -12,6 +12,19 @@ export enum PayInStatus {
   Overpaid = 'overpaid',
 }
 
+export enum PayInCollectionMode {
+  DerivedAddress = 'derived-address',
+  PaymentRouter = 'payment-router',
+}
+
+export enum PayInSweepStatus {
+  NotRequired = 'not_required',
+  Pending = 'pending',
+  Broadcasted = 'broadcasted',
+  Confirmed = 'confirmed',
+  Failed = 'failed',
+}
+
 export type PayInTransferRecord = {
   hash: `0x${string}`;
   from: `0x${string}`;
@@ -36,10 +49,19 @@ export type PayInRecord = {
   receivedAmountAtomic: string;
   depositAddress: `0x${string}`;
   derivationIndex: number;
+  collectionMode: PayInCollectionMode;
+  routerAddress: `0x${string}` | null;
+  routerInvoiceId: `0x${string}` | null;
   startBlock: string;
   expiresAt: string | null;
   metadata: Record<string, unknown>;
   transfers: PayInTransferRecord[];
+  sweepStatus: PayInSweepStatus;
+  sweepTransactionHash: `0x${string}` | null;
+  sweptAmount: string;
+  sweptAmountAtomic: string;
+  sweptAt: string | null;
+  sweepFailureReason: string | null;
   createdAt: string;
   updatedAt: string;
   detectedAt: string | null;

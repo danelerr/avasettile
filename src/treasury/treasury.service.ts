@@ -21,11 +21,17 @@ export class TreasuryService {
         mnemonicConfigured: Boolean(this.configuration.payInMnemonic),
         derivationAccount: this.configuration.payInDerivationAccount,
         lookbackBlocks: this.configuration.payInLookbackBlocks.toString(),
+        paymentRouterConfigured: this.configuration.paymentRouterConfigured,
+        paymentRouterAddress: this.configuration.paymentRouterAddress,
       },
       settlement: {
         enabledAssets: this.configuration.getConfiguredAssets(),
         minConfirmations: this.configuration.minConfirmations,
         waitForReceipt: this.configuration.waitForReceipt,
+      },
+      privacy: {
+        mode: this.configuration.privacyMode,
+        eercContractAddress: this.configuration.eercContractAddress,
       },
     };
   }

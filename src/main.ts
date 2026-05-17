@@ -61,6 +61,10 @@ async function bootstrap() {
     .addTag('reports', 'Institutional operational reporting.')
     .addTag('settlement', 'Simulated fiat settlement records.')
     .addTag('risk', 'Mock risk scoring integration seam for Wavy Node.')
+    .addTag(
+      'privacy',
+      'Experimental private settlement receipts and eERC integration placeholders.',
+    )
     .addApiKey(
       {
         type: 'apiKey',

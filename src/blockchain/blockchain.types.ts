@@ -24,6 +24,14 @@ export type TransferExecution = {
   blockNumber?: string;
 };
 
+export type SweepExecution = TransferExecution & {
+  from: `0x${string}`;
+  to: `0x${string}`;
+  asset: SettlementAsset;
+  amountAtomic: string;
+  amount: string;
+};
+
 export type TransactionReconciliation = {
   hash: Hash;
   network: SettlementNetwork;
@@ -40,4 +48,11 @@ export type IncomingErc20Transfer = {
   amountAtomic: string;
   amount: string;
   blockNumber: string;
+};
+
+export type PaymentRouterInvoicePayment = IncomingErc20Transfer & {
+  invoiceId: `0x${string}`;
+  payer: `0x${string}`;
+  token: `0x${string}`;
+  treasury: `0x${string}`;
 };
