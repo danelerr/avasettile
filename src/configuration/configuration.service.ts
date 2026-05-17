@@ -109,6 +109,46 @@ export class ConfigurationService {
     );
   }
 
+  get storageDriver(): 'json' | 'postgres' {
+    const value = process.env.AVASETTLE_STORAGE_DRIVER ?? 'json';
+    if (value === 'json' || value === 'postgres') return value;
+
+    throw new Error('AVASETTLE_STORAGE_DRIVER must be json or postgres.');
+  }
+
+  get databaseUrl(): string | null {
+    const value =
+      process.env.AVASETTLE_DATABASE_URL ?? process.env.DATABASE_URL ?? '';
+    return value.trim() || null;
+  }
+
+  get databaseConfigured(): boolean {
+    return Boolean(this.databaseUrl);
+  }
+
+  get databaseSsl(): boolean {
+    return this.readBoolean('AVASETTLE_DATABASE_SSL', false);
+  }
+
+  get databaseMaxConnections(): number {
+    const value = this.readInt('AVASETTLE_DATABASE_MAX_CONNECTIONS', 5);
+    if (value === 0) {
+      throw new Error('AVASETTLE_DATABASE_MAX_CONNECTIONS must be at least 1.');
+    }
+
+    return value;
+  }
+
+  get databaseRuntimeStateKey(): string {
+    return (
+      process.env.AVASETTLE_DATABASE_RUNTIME_STATE_KEY?.trim() || 'default'
+    );
+  }
+
+  get databaseAutoMigrate(): boolean {
+    return this.readBoolean('AVASETTLE_DATABASE_AUTO_MIGRATE', false);
+  }
+
   get payInMnemonic(): string | null {
     return process.env.AVASETTLE_PAYIN_MNEMONIC?.trim() || null;
   }

@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationShutdown,
+  OnModuleInit,
+} from '@nestjs/common';
 import {
   existsSync,
   mkdirSync,
@@ -8,14 +13,38 @@ import {
 } from 'node:fs';
 import { dirname } from 'node:path';
 import { ConfigurationService } from '../configuration/configuration.service';
+import { DatabaseService } from '../database/database.service';
 import { PayInCollectionMode, PayInSweepStatus } from '../payins/payins.types';
 import { StorageState } from './storage.types';
 
 @Injectable()
-export class StorageService {
+export class StorageService implements OnModuleInit, OnApplicationShutdown {
+  private readonly logger = new Logger(StorageService.name);
   private state: StorageState | null = null;
+  private persistQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly configuration: ConfigurationService) {}
+  constructor(
+    private readonly configuration: ConfigurationService,
+    private readonly database: DatabaseService,
+  ) {}
+
+  async onModuleInit(): Promise<void> {
+    if (this.configuration.storageDriver !== 'postgres') return;
+
+    await this.database.ensureRuntimeStateTable();
+
+    const key = this.configuration.databaseRuntimeStateKey;
+    const persisted = await this.database.loadRuntimeState(key);
+    this.state = this.normalizeState(persisted ?? this.emptyState());
+
+    if (!persisted) {
+      await this.database.saveRuntimeState(key, this.state);
+    }
+  }
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.persistQueue;
+  }
 
   get snapshot(): StorageState {
     return structuredClone(this.load());
@@ -30,6 +59,11 @@ export class StorageService {
 
   private load(): StorageState {
     if (this.state) return this.state;
+    if (this.configuration.storageDriver === 'postgres') {
+      throw new Error(
+        'PostgreSQL storage has not been initialized. Ensure Nest lifecycle hooks are running.',
+      );
+    }
 
     const filePath = this.configuration.storageFilePath;
     if (!existsSync(filePath)) {
@@ -40,7 +74,12 @@ export class StorageService {
 
     const raw = readFileSync(filePath, 'utf8');
     const parsed = JSON.parse(raw) as Partial<StorageState>;
-    this.state = {
+    this.state = this.normalizeState(parsed);
+    return this.state;
+  }
+
+  private normalizeState(parsed: Partial<StorageState>): StorageState {
+    return {
       ...this.emptyState(),
       ...parsed,
       payins: (parsed.payins ?? []).map((payin) => ({
@@ -62,10 +101,25 @@ export class StorageService {
         ...(parsed.counters ?? {}),
       },
     };
-    return this.state;
   }
 
   private save(state: StorageState): void {
+    if (this.configuration.storageDriver === 'postgres') {
+      const key = this.configuration.databaseRuntimeStateKey;
+      const snapshot = structuredClone(state);
+      this.persistQueue = this.persistQueue
+        .catch(() => undefined)
+        .then(() => this.database.saveRuntimeState(key, snapshot))
+        .catch((error: unknown) => {
+          this.logger.error(
+            error instanceof Error
+              ? error.message
+              : 'Failed to persist ledger state to PostgreSQL.',
+          );
+        });
+      return;
+    }
+
     const filePath = this.configuration.storageFilePath;
     mkdirSync(dirname(filePath), { recursive: true });
     const tmpPath = `${filePath}.tmp`;

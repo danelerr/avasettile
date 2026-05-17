@@ -15,6 +15,7 @@ import { ReportsModule } from './reports/reports.module';
 import { SettlementModule } from './settlement/settlement.module';
 import { RiskModule } from './risk/risk.module';
 import { PrivacyModule } from './privacy/privacy.module';
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { PrivacyModule } from './privacy/privacy.module';
     SettlementModule,
     RiskModule,
     PrivacyModule,
+    DatabaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],

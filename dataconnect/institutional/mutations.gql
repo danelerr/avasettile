@@ -1,0 +1,207 @@
+mutation CreatePayinIntent(
+  $externalId: String
+  $invoiceId: String
+  $mode: PayinMode!
+  $network: String!
+  $chainId: Int!
+  $asset: String!
+  $tokenAddress: String
+  $decimals: Int!
+  $amountExpected: Float!
+  $amountExpectedAtomic: String!
+  $depositAddress: String
+  $derivationAccount: Int
+  $derivationIndex: Int64
+  $startBlock: Int64
+  $expiresAt: Timestamp
+  $metadata: Any!
+)
+@auth(level: PUBLIC, insecureReason: "Institutional connector scaffold; protect with Firebase/IAM before exposing externally.") {
+  payinIntent_insert(
+    data: {
+      externalId: $externalId
+      invoiceId: $invoiceId
+      mode: $mode
+      status: pending
+      network: $network
+      chainId: $chainId
+      asset: $asset
+      tokenAddress: $tokenAddress
+      decimals: $decimals
+      amountExpected: $amountExpected
+      amountExpectedAtomic: $amountExpectedAtomic
+      depositAddress: $depositAddress
+      derivationAccount: $derivationAccount
+      derivationIndex: $derivationIndex
+      startBlock: $startBlock
+      expiresAt: $expiresAt
+      metadata: $metadata
+    }
+  )
+}
+
+mutation MarkPayinDetected(
+  $id: UUID!
+  $status: PayinStatus!
+  $amountDetected: Float!
+  $amountDetectedAtomic: String!
+  $payerAddress: String
+  $paidTxHash: String!
+  $paidBlockNumber: Int64!
+)
+@auth(level: PUBLIC, insecureReason: "Institutional connector scaffold; protect with Firebase/IAM before exposing externally.") {
+  payinIntent_update(
+    id: $id
+    data: {
+      status: $status
+      amountDetected: $amountDetected
+      amountDetectedAtomic: $amountDetectedAtomic
+      payerAddress: $payerAddress
+      paidTxHash: $paidTxHash
+      paidBlockNumber: $paidBlockNumber
+    }
+  )
+}
+
+mutation MarkPayinSweepSubmitted(
+  $id: UUID!
+  $sweepDestination: String!
+  $sweepTxHash: String!
+)
+@auth(level: PUBLIC, insecureReason: "Institutional connector scaffold; protect with Firebase/IAM before exposing externally.") {
+  payinIntent_update(
+    id: $id
+    data: {
+      status: sweep_submitted
+      sweepDestination: $sweepDestination
+      sweepTxHash: $sweepTxHash
+    }
+  )
+}
+
+mutation CreatePayoutRequest(
+  $externalId: String!
+  $chainFlowExternalTx: String
+  $chainFlowRetiroPago: Int64
+  $chainFlowTransferBlock: Int64
+  $chainFlowPaymentProcessor: Int64
+  $chainFlowCurrencyCode: Int64
+  $network: String!
+  $chainId: Int!
+  $asset: String!
+  $tokenAddress: String
+  $decimals: Int!
+  $amount: Float!
+  $amountAtomic: String!
+  $beneficiaryAddress: String!
+  $beneficiaryName: String
+  $treasuryAddress: String
+  $preparedAt: Timestamp
+  $metadata: Any!
+)
+@auth(level: PUBLIC, insecureReason: "Institutional connector scaffold; protect with Firebase/IAM before exposing externally.") {
+  payoutRequest_insert(
+    data: {
+      externalId: $externalId
+      chainFlowExternalTx: $chainFlowExternalTx
+      chainFlowRetiroPago: $chainFlowRetiroPago
+      chainFlowTransferBlock: $chainFlowTransferBlock
+      chainFlowPaymentProcessor: $chainFlowPaymentProcessor
+      chainFlowCurrencyCode: $chainFlowCurrencyCode
+      status: prepared
+      network: $network
+      chainId: $chainId
+      asset: $asset
+      tokenAddress: $tokenAddress
+      decimals: $decimals
+      amount: $amount
+      amountAtomic: $amountAtomic
+      beneficiaryAddress: $beneficiaryAddress
+      beneficiaryName: $beneficiaryName
+      treasuryAddress: $treasuryAddress
+      metadata: $metadata
+      preparedAt: $preparedAt
+    }
+  )
+}
+
+mutation MarkPayoutBroadcasted(
+  $id: UUID!
+  $transactionHash: String!
+  $treasuryAddress: String
+  $broadcastedAt: Timestamp
+)
+@auth(level: PUBLIC, insecureReason: "Institutional connector scaffold; protect with Firebase/IAM before exposing externally.") {
+  payoutRequest_update(
+    id: $id
+    data: {
+      status: broadcasted
+      transactionHash: $transactionHash
+      treasuryAddress: $treasuryAddress
+      broadcastedAt: $broadcastedAt
+    }
+  )
+}
+
+mutation CreateSettlement(
+  $sourceType: SettlementSourceType!
+  $sourceId: UUID
+  $asset: String!
+  $grossAmount: Float!
+  $feeBps: Int!
+  $feeAmount: Float!
+  $netAmount: Float!
+  $fiatCurrency: String!
+  $fxRate: Float!
+  $fiatAmount: Float!
+  $payoutRequestId: UUID
+  $payinIntentId: UUID
+  $metadata: Any!
+)
+@auth(level: PUBLIC, insecureReason: "Institutional connector scaffold; protect with Firebase/IAM before exposing externally.") {
+  settlement_insert(
+    data: {
+      sourceType: $sourceType
+      sourceId: $sourceId
+      status: pending
+      asset: $asset
+      grossAmount: $grossAmount
+      feeBps: $feeBps
+      feeAmount: $feeAmount
+      netAmount: $netAmount
+      fiatCurrency: $fiatCurrency
+      fxRate: $fxRate
+      fiatAmount: $fiatAmount
+      payoutRequestId: $payoutRequestId
+      payinIntentId: $payinIntentId
+      metadata: $metadata
+    }
+  )
+}
+
+mutation RecordAuditEvent(
+  $actorType: String!
+  $actorId: String
+  $subjectType: String!
+  $subjectId: UUID
+  $eventType: String!
+  $payload: Any!
+  $correlationId: String
+  $requestId: String
+  $ipAddress: String
+)
+@auth(level: PUBLIC, insecureReason: "Institutional connector scaffold; protect with Firebase/IAM before exposing externally.") {
+  auditEvent_insert(
+    data: {
+      actorType: $actorType
+      actorId: $actorId
+      subjectType: $subjectType
+      subjectId: $subjectId
+      eventType: $eventType
+      payload: $payload
+      correlationId: $correlationId
+      requestId: $requestId
+      ipAddress: $ipAddress
+    }
+  )
+}

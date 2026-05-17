@@ -18,10 +18,12 @@ This service is intentionally isolated from the existing Parmelia Worker and is 
 - Authorizes and broadcasts ERC-20 treasury payouts with `viem`.
 - Reconciles transaction receipts and confirmation depth.
 - Exposes treasury status and balances.
-- Records a JSON-file ledger and audit trail behind a repository boundary.
+- Records a ledger and audit trail behind a repository boundary, using either a local JSON file or PostgreSQL through `pg`.
 - Provides reports, mock risk scoring, simulated fiat settlement, and experimental private settlement receipts.
 
-The current ledger persists to `AVASETTLE_STORAGE_FILE`, defaulting to `data/avasettle-ledger.json`. This is intentionally simple for the hackathon; `StorageService`, `PayoutLedgerService`, and `PayInLedgerService` are the replacement points for Postgres, D1, DynamoDB or another durable ledger.
+The default ledger persists to `AVASETTLE_STORAGE_FILE`, defaulting to `data/avasettle-ledger.json`. For Cloud SQL PostgreSQL or Firebase SQL Connect-backed demos, set `AVASETTLE_STORAGE_DRIVER=postgres` and `AVASETTLE_DATABASE_URL`. AvaSettle uses raw SQL through `pg`; there is no Prisma, TypeORM, Sequelize, Drizzle or other ORM.
+
+The normalized institutional schema lives in `db/migrations/001_init_avasettle.sql`, copied from `bd.sql`. It includes institutions, merchants, assets, treasury wallets, pay-ins, PaymentRouter intents, payouts, blockchain transactions, settlements, risk assessments, audit events, idempotency keys, webhooks, eERC/private-payment placeholders, and operational views. `db/migrations/002_runtime_state.sql` adds a small runtime-state table so the current NestJS services can persist their existing ledger contract while the normalized repositories are adopted incrementally.
 
 ## Smart Contracts
 
@@ -53,6 +55,8 @@ pnpm start:dev
 pnpm build
 pnpm test
 pnpm test:e2e
+pnpm db:check
+pnpm db:migrate
 ```
 
 ## Environment
@@ -66,7 +70,13 @@ AVASETTLE_API_KEY=pon-una-key-generada
 AVASETTLE_NETWORK=avalanche-fuji
 AVASETTLE_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
 AVASETTLE_EXPLORER_BASE_URL=https://subnets-test.avax.network/c-chain
+AVASETTLE_STORAGE_DRIVER=json
 AVASETTLE_STORAGE_FILE=data/avasettle-ledger.json
+AVASETTLE_DATABASE_URL=
+AVASETTLE_DATABASE_SSL=false
+AVASETTLE_DATABASE_MAX_CONNECTIONS=5
+AVASETTLE_DATABASE_RUNTIME_STATE_KEY=default
+AVASETTLE_DATABASE_AUTO_MIGRATE=false
 AVASETTLE_TREASURY_PRIVATE_KEY=0x...
 AVASETTLE_PAYIN_MNEMONIC="..."
 AVASETTLE_PAYIN_DERIVATION_ACCOUNT=0
@@ -97,7 +107,13 @@ How to obtain each value for a Fuji demo:
 | `AVASETTLE_NETWORK` | Use `avalanche-fuji` for the hackathon demo. |
 | `AVASETTLE_RPC_URL` | Use Avalanche Fuji C-Chain RPC `https://api.avax-test.network/ext/bc/C/rpc`, or a dedicated provider RPC if the demo needs higher reliability. |
 | `AVASETTLE_EXPLORER_BASE_URL` | Use `https://subnets-test.avax.network/c-chain` for Fuji transaction inspection. |
+| `AVASETTLE_STORAGE_DRIVER` | Use `json` for local demos without infrastructure. Use `postgres` when connecting to Firebase SQL Connect / Cloud SQL PostgreSQL. |
 | `AVASETTLE_STORAGE_FILE` | Use `data/avasettle-ledger.json` locally. On Cloud Run demos use `/tmp/avasettle-ledger.json`; this is ephemeral and must be replaced by a database for production. |
+| `AVASETTLE_DATABASE_URL` | PostgreSQL connection string for Cloud SQL or the SQL Connect emulator database. Required when `AVASETTLE_STORAGE_DRIVER=postgres`. |
+| `AVASETTLE_DATABASE_SSL` | Set `true` when the PostgreSQL endpoint requires TLS, commonly for managed public endpoints. Keep `false` for local emulator/PGlite or Cloud SQL Unix-socket/proxy setups. |
+| `AVASETTLE_DATABASE_MAX_CONNECTIONS` | Connection pool size for `pg`. Keep small for Cloud Run, for example `5`. |
+| `AVASETTLE_DATABASE_RUNTIME_STATE_KEY` | Logical key for the runtime ledger row in `avasettle_runtime_state`. Use `default` unless running multiple isolated demo ledgers in one database. |
+| `AVASETTLE_DATABASE_AUTO_MIGRATE` | Set `true` only for controlled demo environments where the API can run SQL migrations on startup. Prefer `pnpm db:migrate` for production-like deployments. |
 | `AVASETTLE_TREASURY_PRIVATE_KEY` | Create a dedicated demo EVM wallet, export only that demo private key, fund it with Fuji AVAX for gas and Fuji USDC for payouts. Do not use a personal wallet or mainnet key. |
 | `AVASETTLE_PAYIN_MNEMONIC` | Generate a separate demo mnemonic dedicated to pay-in deposit address derivation. It controls funds sent to derived addresses. |
 | `AVASETTLE_PAYIN_DERIVATION_ACCOUNT` | Keep `0` unless you intentionally want another HD account branch. |
@@ -121,6 +137,92 @@ How to obtain each value for a Fuji demo:
 Do not rely on default token addresses for production. Configure the exact stablecoin contract used by the institution and selected Avalanche network.
 
 Do not configure pay-ins with a throwaway mnemonic in production. `AVASETTLE_PAYIN_MNEMONIC` derives real EVM addresses, so it controls funds received at those addresses.
+
+## PostgreSQL And Firebase SQL Connect
+
+This iteration reads `bd.sql` as the intended PostgreSQL model and keeps it as `db/migrations/001_init_avasettle.sql`. Run migrations with raw SQL and `pg`:
+
+```bash
+cd avasettle
+AVASETTLE_DATABASE_URL=postgresql://user:password@host:5432/avasettle pnpm db:check
+AVASETTLE_DATABASE_URL=postgresql://user:password@host:5432/avasettle pnpm db:migrate
+```
+
+To make the API use PostgreSQL for the current ledger:
+
+```bash
+AVASETTLE_STORAGE_DRIVER=postgres
+AVASETTLE_DATABASE_URL=postgresql://user:password@host:5432/avasettle
+```
+
+`/health/readiness` now reports `storage.driver`, database configuration and `checks.databaseReady`. In `json` mode the database check is non-blocking. In `postgres` mode, missing or unreachable PostgreSQL leaves readiness as `degraded`.
+
+Firebase SQL Connect structure is included under:
+
+```txt
+firebase.json
+.firebaserc
+dataconnect/dataconnect.yaml
+dataconnect/schema/schema.gql
+dataconnect/institutional/connector.yaml
+dataconnect/institutional/queries.gql
+dataconnect/institutional/mutations.gql
+```
+
+Setup flow for Firebase SQL Connect / Cloud SQL PostgreSQL:
+
+```bash
+cd avasettle
+npm install -g firebase-tools
+firebase login
+firebase use <firebase-project-id>
+firebase init dataconnect
+```
+
+For this repo the Firebase project is pinned in `.firebaserc`:
+
+```json
+{
+  "projects": {
+    "default": "test-bd-9817c"
+  }
+}
+```
+
+The current Data Connect service discovered by Firebase CLI is:
+
+| Setting | Value |
+| --- | --- |
+| Project ID | `test-bd-9817c` |
+| Service ID | `test-bd-9817c-service` |
+| Location | `us-east4` |
+| Cloud SQL instance | `test-bd-9817c-instance` |
+| Database | `test-bd-9817c-database` |
+
+Keep the generated Firebase project settings, then preserve AvaSettle's `dataconnect/` schema and connector files. `dataconnect/dataconnect.yaml` is aligned with the existing service:
+
+```yaml
+serviceId: test-bd-9817c-service
+location: us-east4
+schema:
+  source: ./schema
+  datasource:
+    postgresql:
+      database: test-bd-9817c-database
+      cloudSql:
+        instanceId: test-bd-9817c-instance
+        schemaValidation: COMPATIBLE
+connectorDirs:
+  - ./institutional
+```
+
+Use the SQL Connect emulator/PGlite for local connector work through the Firebase CLI and VS Code extension. Deploy schemas, queries and mutations with:
+
+```bash
+firebase deploy --only dataconnect
+```
+
+The NestJS backend still talks to PostgreSQL directly through `pg`. Firebase SQL Connect gives the project versioned GraphQL schema, queries and mutations for Firebase-managed clients and tooling; it is not used as an ORM inside AvaSettle.
 
 ## Fuji Demo Flow
 
@@ -692,7 +794,7 @@ Returns one experimental private settlement receipt.
 - PaymentRouter avoids per-address sweep gas by transferring payer funds directly to treasury.
 - Keep token contract addresses explicit per network and institution.
 - Rotate `AVASETTLE_API_KEY` before shared demos.
-- Replace the JSON ledger before production.
+- Use `AVASETTLE_STORAGE_DRIVER=postgres` and Cloud SQL PostgreSQL before production or institutional pilots.
 - Add transaction policy checks before supporting mainnet volume.
 
 ## References
@@ -700,5 +802,7 @@ Returns one experimental private settlement receipt.
 - Avalanche Fuji network parameters: `https://build.avax.network/docs/quick-start/networks/fuji-testnet`
 - Circle USDC contract addresses: `https://developers.circle.com/stablecoins/usdc-contract-addresses`
 - NestJS OpenAPI integration: `https://docs.nestjs.com/openapi/introduction`
+- Firebase SQL Connect quickstart: `https://firebase.google.com/docs/sql-connect/quickstart?userflow=automatic`
+- Firebase SQL Connect configuration reference: `https://firebase.google.com/docs/sql-connect/configuration-reference`
 - Cloud Run container runtime contract: `https://cloud.google.com/run/docs/container-contract`
 - Cloud Run source deployment: `https://cloud.google.com/run/docs/deploying-source-code`

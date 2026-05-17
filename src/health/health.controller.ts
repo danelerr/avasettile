@@ -32,7 +32,7 @@ export class HealthController {
   @ApiOperation({
     summary: 'Check operational readiness',
     description:
-      'Checks whether API key, treasury signer, token contracts, and RPC connectivity are configured. A degraded response means the server is alive but not ready for payouts.',
+      'Checks whether API key, treasury signer, token contracts, storage, and RPC connectivity are configured. A degraded response means the server is alive but not ready for institutional flows.',
   })
   @ApiOkResponse({
     description: 'Readiness state for operational dependencies.',
@@ -44,11 +44,17 @@ export class HealthController {
           chainId: 43113,
           name: 'Avalanche Fuji Testnet',
         },
+        storage: {
+          driver: 'json',
+          configured: false,
+          required: false,
+        },
         checks: {
           apiKeyConfigured: true,
           treasuryConfigured: false,
           payInMnemonicConfigured: false,
           assetsConfigured: false,
+          databaseReady: true,
           rpcReachable: true,
         },
         timestamp: '2026-05-16T21:22:09.663Z',
