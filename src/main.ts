@@ -4,12 +4,17 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { config as loadEnv } from 'dotenv';
 import { AppModule } from './app.module';
 import { ConfigurationService } from './configuration/configuration.service';
+import { loadConfigFile } from './configuration/config-file.loader';
+import { ApiExceptionFilter } from './observability/api-exception.filter';
 
+// Load .env files first so secrets in them take precedence over config file.
 loadEnv({ path: '.env' });
 loadEnv({ path: '.env.local', override: true });
+// Fill in non-secret operational config from JSON config file for any vars not already set.
+loadConfigFile();
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const configuration = app.get(ConfigurationService);
 
   app.enableCors({
@@ -22,9 +27,14 @@ async function bootstrap() {
       'x-avasettle-api-key',
       'x-correlation-id',
       'x-institution-id',
+      'x-request-id',
+      'traceparent',
+      'tracestate',
     ],
+    exposedHeaders: ['x-request-id'],
   });
   app.enableShutdownHooks();
+  app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

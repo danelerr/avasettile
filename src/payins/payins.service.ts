@@ -2,19 +2,27 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { formatUnits } from 'viem';
+import { formatEther, formatUnits, parseEther } from 'viem';
 import { AuditService } from '../audit/audit.service';
 import { AuditActor } from '../audit/audit.types';
+import { parseAtomicAmount } from '../blockchain/amount.utils';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { ConfigurationService } from '../configuration/configuration.service';
+import { AssetRuntimeConfig } from '../configuration/configuration.types';
+import { DatabaseService } from '../database/database.service';
 import { RequestContext } from '../payouts/payout.types';
+import { WebhookService } from '../webhooks/webhook.service';
+import { AcceptPayInDto } from './dto/accept-payin.dto';
 import { CreatePayInDto } from './dto/create-payin.dto';
 import { ListPayInsQueryDto } from './dto/list-payins-query.dto';
 import { SweepPayInDto } from './dto/sweep-payin.dto';
+import { TopUpAndSweepDto } from './dto/topup-and-sweep.dto';
+import { TopUpPayInDto } from './dto/topup-payin.dto';
 import { PayInLedgerService } from './payin-ledger.service';
 import {
   PayInCollectionMode,
@@ -27,33 +35,33 @@ import {
 
 @Injectable()
 export class PayinsService {
+  private readonly logger = new Logger(PayinsService.name);
+
   constructor(
     private readonly audit: AuditService,
     private readonly blockchain: BlockchainService,
     private readonly configuration: ConfigurationService,
+    private readonly database: DatabaseService,
     private readonly ledger: PayInLedgerService,
+    private readonly webhook: WebhookService,
   ) {}
 
   async createPayIn(
     dto: CreatePayInDto,
     context: RequestContext,
   ): Promise<PayInResponse> {
-    const existing = this.ledger.findByExternalId(dto.externalId);
-    if (existing) {
-      return this.toResponse(existing, true);
+    // Idempotency key: if the same key was used in a prior request, return that result.
+    if (context.idempotencyKey) {
+      const prior = this.ledger.findByIdempotencyKey(context.idempotencyKey);
+      if (prior) return this.toResponse(prior, true);
     }
 
     const assetConfig = this.configuration.getAssetConfig(dto.asset);
-    const expectedAmountAtomic = this.blockchain.toAtomicAmount(
-      dto.asset,
-      dto.amount,
-    );
+    const expectedAmountAtomic = this.parseAmount(dto.amount, assetConfig);
+
     const collectionMode =
       dto.collectionMode ?? PayInCollectionMode.DerivedAddress;
     const isRouterMode = collectionMode === PayInCollectionMode.PaymentRouter;
-    const derivationIndex = isRouterMode
-      ? -1
-      : this.ledger.nextDerivationIndex();
     const routerAddress = isRouterMode
       ? this.requirePaymentRouterAddress()
       : null;
@@ -61,49 +69,79 @@ export class PayinsService {
       ? (dto.routerInvoiceId ??
         this.blockchain.routerInvoiceIdFromExternalId(dto.externalId))
       : null;
-    const depositAddress: `0x${string}` =
-      routerAddress ?? this.blockchain.derivePayInAddress(derivationIndex);
+
     const startBlock = await this.blockchain.getLatestBlockNumber();
     const now = new Date();
     const expirationMinutes =
       dto.expiresInMinutes ?? this.configuration.payInDefaultExpirationMinutes;
-    const record = this.ledger.create({
-      id: randomUUID(),
-      externalId: dto.externalId,
-      chainFlowRequestId: dto.chainFlowRequestId ?? null,
-      status: PayInStatus.Pending,
-      network: this.configuration.settlementNetwork,
-      chainId: this.configuration.networkSummary.chainId,
-      asset: dto.asset,
-      tokenAddress: assetConfig.address!,
-      expectedAmount: dto.amount,
-      expectedAmountAtomic: expectedAmountAtomic.toString(),
-      receivedAmount: '0',
-      receivedAmountAtomic: '0',
-      depositAddress,
-      derivationIndex,
+    const expiresAt = expirationMinutes
+      ? new Date(now.getTime() + expirationMinutes * 60_000).toISOString()
+      : null;
+
+    // For Postgres deployments, claim the derivation index from the SQL counter
+    // table atomically so multiple instances never derive the same address.
+    let preClaimedIndex: number | undefined;
+    if (
+      this.configuration.storageDriver === 'postgres' &&
+      collectionMode !== PayInCollectionMode.PaymentRouter
+    ) {
+      const claimed = await this.database.claimNextPayInIndex();
+      if (claimed !== null) preClaimedIndex = claimed;
+    }
+
+    // Atomically check for existing externalId and allocate derivation index in one update.
+    const { record, existed } = this.ledger.findOrCreate(
+      dto.externalId,
       collectionMode,
-      routerAddress,
-      routerInvoiceId,
-      startBlock: startBlock.toString(),
-      expiresAt: expirationMinutes
-        ? new Date(now.getTime() + expirationMinutes * 60_000).toISOString()
-        : null,
-      metadata: dto.metadata ?? {},
-      transfers: [],
-      sweepStatus: isRouterMode
-        ? PayInSweepStatus.NotRequired
-        : PayInSweepStatus.Pending,
-      sweepTransactionHash: null,
-      sweptAmount: '0',
-      sweptAmountAtomic: '0',
-      sweptAt: null,
-      sweepFailureReason: null,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      detectedAt: null,
-      confirmedAt: null,
-    });
+      (derivationIndex) => {
+        const depositAddress: `0x${string}` =
+          routerAddress ?? this.blockchain.derivePayInAddress(derivationIndex);
+        return {
+          id: randomUUID(),
+          externalId: dto.externalId,
+          chainFlowRequestId: dto.chainFlowRequestId ?? null,
+          status: PayInStatus.Pending,
+          network: this.configuration.settlementNetwork,
+          chainId: this.configuration.networkSummary.chainId,
+          asset: dto.asset,
+          tokenAddress: assetConfig.address!,
+          expectedAmount: dto.amount,
+          expectedAmountAtomic: expectedAmountAtomic.toString(),
+          receivedAmount: '0',
+          receivedAmountAtomic: '0',
+          depositAddress,
+          derivationIndex,
+          collectionMode,
+          routerAddress,
+          routerInvoiceId,
+          startBlock: startBlock.toString(),
+          expiresAt,
+          metadata: dto.metadata ?? {},
+          transfers: [],
+          sweepStatus: isRouterMode
+            ? PayInSweepStatus.NotRequired
+            : PayInSweepStatus.Pending,
+          sweepTransactionHash: null,
+          sweptAmount: '0',
+          sweptAmountAtomic: '0',
+          sweptAt: null,
+          sweepFailureReason: null,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          detectedAt: null,
+          confirmedAt: null,
+          acceptedAt: null,
+          acceptanceNote: null,
+        };
+      },
+      preClaimedIndex,
+    );
+
+    if (existed) return this.toResponse(record, true);
+
+    if (context.idempotencyKey) {
+      this.ledger.storeIdempotencyKey(context.idempotencyKey, record.id);
+    }
 
     this.audit.record({
       type: 'PAYIN_CREATED',
@@ -160,8 +198,8 @@ export class PayinsService {
     );
     const enoughConfirmations =
       latestTransferBlock !== null &&
-      latestBlock >= latestTransferBlock &&
-      Number(latestBlock - latestTransferBlock + 1n) >=
+      latestBlock > latestTransferBlock &&
+      Number(latestBlock - latestTransferBlock) >=
         this.configuration.minConfirmations;
     const expired =
       Boolean(payin.expiresAt) &&
@@ -180,17 +218,16 @@ export class PayinsService {
         : PayInStatus.Detected;
     }
 
+    const isFirstDetection = transfers.length > 0 && !payin.detectedAt;
+    const isNewConfirmation = status === PayInStatus.Confirmed && !payin.confirmedAt;
+
     const updated = this.ledger.update(id, {
       status,
       receivedAmountAtomic: totalReceivedAtomic.toString(),
       receivedAmount: formatUnits(totalReceivedAtomic, assetConfig.decimals),
       transfers,
-      detectedAt:
-        transfers.length > 0 && !payin.detectedAt ? now : payin.detectedAt,
-      confirmedAt:
-        status === PayInStatus.Confirmed && !payin.confirmedAt
-          ? now
-          : payin.confirmedAt,
+      detectedAt: isFirstDetection ? now : payin.detectedAt,
+      confirmedAt: isNewConfirmation ? now : payin.confirmedAt,
     });
     if (!updated) throw new ConflictException('Unable to update pay-in.');
 
@@ -204,6 +241,40 @@ export class PayinsService {
         transferCount: transfers.length,
       },
     });
+
+    if (isFirstDetection) {
+      void this.webhook.fire('payin.detected', {
+        id: updated.id,
+        externalId: updated.externalId,
+        asset: updated.asset,
+        depositAddress: updated.depositAddress,
+        receivedAmount: updated.receivedAmount,
+        expectedAmount: updated.expectedAmount,
+        detectedAt: updated.detectedAt,
+      });
+    }
+
+    if (isNewConfirmation) {
+      void this.webhook.fire('payin.confirmed', {
+        id: updated.id,
+        externalId: updated.externalId,
+        asset: updated.asset,
+        receivedAmount: updated.receivedAmount,
+        depositAddress: updated.depositAddress,
+        confirmedAt: updated.confirmedAt,
+      });
+
+      if (
+        this.configuration.autoSweep &&
+        payin.collectionMode !== PayInCollectionMode.PaymentRouter
+      ) {
+        void this.topUpAndSweep(id, {}, context).catch((error: unknown) => {
+          this.logger.warn(
+            `Auto-sweep failed for pay-in ${id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          );
+        });
+      }
+    }
 
     return this.toResponse(updated);
   }
@@ -230,8 +301,9 @@ export class PayinsService {
       return this.toResponse(payin, true);
     }
 
+    const assetConfig = this.configuration.getAssetConfig(payin.asset);
     const amountAtomic = dto.amount
-      ? this.blockchain.toAtomicAmount(payin.asset, dto.amount)
+      ? this.parseAmount(dto.amount, assetConfig)
       : undefined;
 
     try {
@@ -290,6 +362,132 @@ export class PayinsService {
     }
   }
 
+  acceptPayIn(
+    id: string,
+    dto: AcceptPayInDto,
+    context: RequestContext,
+  ): PayInResponse {
+    const payin = this.requirePayIn(id);
+    if (
+      payin.status !== PayInStatus.Underpaid &&
+      payin.status !== PayInStatus.Overpaid
+    ) {
+      throw new ConflictException(
+        `Pay-in cannot be accepted from status "${payin.status}". Only underpaid or overpaid pay-ins can be manually accepted.`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const updated = this.ledger.update(id, {
+      status: PayInStatus.Confirmed,
+      acceptedAt: now,
+      acceptanceNote: dto.note ?? null,
+      confirmedAt: payin.confirmedAt ?? now,
+    });
+    if (!updated) throw new ConflictException('Unable to update pay-in.');
+
+    this.audit.record({
+      type: 'PAYIN_ACCEPTED',
+      subjectId: id,
+      actor: this.toAuditActor(context),
+      payload: {
+        previousStatus: payin.status,
+        receivedAmount: payin.receivedAmount,
+        expectedAmount: payin.expectedAmount,
+        note: dto.note ?? null,
+      },
+    });
+
+    void this.webhook.fire('payin.confirmed', {
+      id: updated.id,
+      externalId: updated.externalId,
+      asset: updated.asset,
+      receivedAmount: updated.receivedAmount,
+      depositAddress: updated.depositAddress,
+      confirmedAt: updated.confirmedAt,
+      acceptedManually: true,
+    });
+
+    return this.toResponse(updated);
+  }
+
+  async topUpPayIn(
+    id: string,
+    dto: TopUpPayInDto,
+    context: RequestContext,
+  ): Promise<PayInResponse> {
+    const payin = this.requirePayIn(id);
+    if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
+      throw new BadRequestException(
+        'PaymentRouter pay-ins do not require gas top-up — the payer funds the gas.',
+      );
+    }
+
+    const amountWei = dto.amountAvax
+      ? parseEther(dto.amountAvax as `${number}`)
+      : parseEther('0.002');
+
+    const transfer = await this.blockchain.sendNativeTransfer(
+      payin.depositAddress,
+      amountWei,
+    );
+
+    this.audit.record({
+      type: 'PAYIN_TOPUP',
+      subjectId: id,
+      actor: this.toAuditActor(context),
+      payload: {
+        depositAddress: payin.depositAddress,
+        amountAvax: formatEther(amountWei),
+        transactionHash: transfer.hash,
+        status: transfer.status,
+      },
+    });
+
+    return this.toResponse(payin);
+  }
+
+  async topUpAndSweep(
+    id: string,
+    dto: TopUpAndSweepDto,
+    context: RequestContext,
+  ): Promise<PayInResponse> {
+    const payin = this.requirePayIn(id);
+    if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
+      throw new BadRequestException(
+        'PaymentRouter pay-ins route directly to treasury — no top-up or sweep needed.',
+      );
+    }
+
+    const amountWei = dto.amountAvax
+      ? parseEther(dto.amountAvax as `${number}`)
+      : parseEther('0.002');
+
+    // Always wait for the top-up to land before attempting the sweep.
+    const topup = await this.blockchain.sendNativeTransfer(
+      payin.depositAddress,
+      amountWei,
+    );
+
+    this.audit.record({
+      type: 'PAYIN_TOPUP',
+      subjectId: id,
+      actor: this.toAuditActor(context),
+      payload: {
+        depositAddress: payin.depositAddress,
+        amountAvax: formatEther(amountWei),
+        transactionHash: topup.hash,
+        status: topup.status,
+      },
+    });
+
+    if (topup.status === 'broadcasted') {
+      await this.blockchain.waitForTransaction(topup.hash);
+    }
+
+    return this.sweepPayIn(id, { notes: dto.notes }, context);
+  }
+
   private async findPayInTransfers(
     payin: PayInRecord,
   ): Promise<PayInTransferRecord[]> {
@@ -338,6 +536,16 @@ export class PayinsService {
     }
 
     return address;
+  }
+
+  private parseAmount(amount: string, assetConfig: AssetRuntimeConfig): bigint {
+    try {
+      return parseAtomicAmount(amount, assetConfig.decimals);
+    } catch (e) {
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'Invalid amount.',
+      );
+    }
   }
 
   private toResponse(

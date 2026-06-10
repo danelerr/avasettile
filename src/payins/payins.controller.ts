@@ -20,10 +20,13 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
-import { RequestContext } from '../payouts/payout.types';
+import { extractRequestContext } from '../common/request-context.util';
+import { AcceptPayInDto } from './dto/accept-payin.dto';
 import { CreatePayInDto } from './dto/create-payin.dto';
 import { ListPayInsQueryDto } from './dto/list-payins-query.dto';
 import { SweepPayInDto } from './dto/sweep-payin.dto';
+import { TopUpAndSweepDto } from './dto/topup-and-sweep.dto';
+import { TopUpPayInDto } from './dto/topup-payin.dto';
 import { PayinsService } from './payins.service';
 
 const payInExample = {
@@ -73,10 +76,7 @@ export class PayinsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Ip() sourceIp: string,
   ) {
-    return this.payins.createPayIn(
-      dto,
-      this.toRequestContext(headers, sourceIp),
-    );
+    return this.payins.createPayIn(dto, extractRequestContext(headers, sourceIp));
   }
 
   @Get()
@@ -113,10 +113,7 @@ export class PayinsController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Ip() sourceIp: string,
   ) {
-    return this.payins.reconcilePayIn(
-      id,
-      this.toRequestContext(headers, sourceIp),
-    );
+    return this.payins.reconcilePayIn(id, extractRequestContext(headers, sourceIp));
   }
 
   @Post(':id/sweep')
@@ -147,25 +144,99 @@ export class PayinsController {
     return this.payins.sweepPayIn(
       id,
       dto ?? {},
-      this.toRequestContext(headers, sourceIp),
+      extractRequestContext(headers, sourceIp),
     );
   }
 
-  private toRequestContext(
-    headers: Record<string, string | string[] | undefined>,
-    sourceIp: string,
-  ): RequestContext {
-    return {
-      institutionId: this.firstHeader(headers['x-institution-id']),
-      correlationId: this.firstHeader(headers['x-correlation-id']),
-      idempotencyKey: this.firstHeader(headers['idempotency-key']),
-      actor: this.firstHeader(headers.authorization) ? 'chain-flow' : null,
-      sourceIp,
-    };
+  @Post(':id/accept')
+  @ApiOperation({
+    summary: 'Accept an underpaid or overpaid pay-in',
+    description:
+      'Manually marks an underpaid or overpaid pay-in as confirmed, with an optional operator note. Use when the institution decides to accept the received amount regardless of the discrepancy.',
+  })
+  @ApiParam({ name: 'id', example: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10' })
+  @ApiBody({ type: AcceptPayInDto, required: false })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        id: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10',
+        status: 'confirmed',
+        acceptedAt: '2026-06-09T10:00:00.000Z',
+        acceptanceNote: 'Client confirmed partial payment acceptable.',
+      },
+    },
+  })
+  acceptPayIn(
+    @Param('id') id: string,
+    @Body() dto: AcceptPayInDto,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Ip() sourceIp: string,
+  ) {
+    return this.payins.acceptPayIn(
+      id,
+      dto ?? {},
+      extractRequestContext(headers, sourceIp),
+    );
   }
 
-  private firstHeader(value: string | string[] | undefined): string | null {
-    if (Array.isArray(value)) return value[0] ?? null;
-    return value ?? null;
+  @Post(':id/topup')
+  @ApiOperation({
+    summary: 'Top-up deposit address with AVAX for sweep gas',
+    description:
+      'Sends AVAX from the treasury to the derived deposit address so it can pay gas for the ERC-20 sweep transaction. Defaults to 0.002 AVAX, which covers a standard USDC transfer on Avalanche C-Chain.',
+  })
+  @ApiParam({ name: 'id', example: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10' })
+  @ApiBody({ type: TopUpPayInDto, required: false })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        id: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10',
+        depositAddress: '0x1111111111111111111111111111111111111111',
+        status: 'confirmed',
+      },
+    },
+  })
+  topUpPayIn(
+    @Param('id') id: string,
+    @Body() dto: TopUpPayInDto,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Ip() sourceIp: string,
+  ) {
+    return this.payins.topUpPayIn(
+      id,
+      dto ?? {},
+      extractRequestContext(headers, sourceIp),
+    );
+  }
+
+  @Post(':id/topup-and-sweep')
+  @ApiOperation({
+    summary: 'Top-up gas and sweep in one operation',
+    description:
+      'Sends AVAX from treasury to the deposit address, waits for confirmation, then immediately sweeps the ERC-20 balance to treasury. Use this instead of calling /topup and /sweep separately.',
+  })
+  @ApiParam({ name: 'id', example: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10' })
+  @ApiBody({ type: TopUpAndSweepDto, required: false })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        id: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10',
+        status: 'confirmed',
+        sweepStatus: 'broadcasted',
+        sweepTransactionHash: '0xaaa...',
+      },
+    },
+  })
+  topUpAndSweep(
+    @Param('id') id: string,
+    @Body() dto: TopUpAndSweepDto,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Ip() sourceIp: string,
+  ) {
+    return this.payins.topUpAndSweep(
+      id,
+      dto ?? {},
+      extractRequestContext(headers, sourceIp),
+    );
   }
 }

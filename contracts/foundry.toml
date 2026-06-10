@@ -1,0 +1,22 @@
+[profile.default]
+src     = "src"
+out     = "out"
+libs    = []
+test    = "test"
+script  = "script"
+
+remappings = [
+  "@openzeppelin/contracts/=../node_modules/@openzeppelin/contracts/"
+]
+
+solc_version = "0.8.20"
+
+[profile.fuji]
+rpc_endpoints = { avalanche_fuji = "${AVALANCHE_FUJI_RPC_URL}" }
+
+[profile.mainnet]
+rpc_endpoints = { avalanche = "${AVALANCHE_MAINNET_RPC_URL}" }
+
+[etherscan]
+avalanche_fuji = { key = "${SNOWTRACE_API_KEY}", url = "https://api-testnet.snowtrace.io/api" }
+avalanche      = { key = "${SNOWTRACE_API_KEY}", url = "https://api.snowtrace.io/api" }

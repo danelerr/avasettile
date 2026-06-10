@@ -139,14 +139,8 @@ export class ConfigurationService {
     return value;
   }
 
-  get databaseRuntimeStateKey(): string {
-    return (
-      process.env.AVASETTLE_DATABASE_RUNTIME_STATE_KEY?.trim() || 'default'
-    );
-  }
-
   get databaseAutoMigrate(): boolean {
-    return this.readBoolean('AVASETTLE_DATABASE_AUTO_MIGRATE', false);
+    return this.readBoolean('AVASETTLE_DATABASE_AUTO_MIGRATE', true);
   }
 
   get payInMnemonic(): string | null {
@@ -224,6 +218,38 @@ export class ConfigurationService {
     return this.readNumber('AVASETTLE_RISK_REJECT_AMOUNT', 50_000);
   }
 
+  get webhookUrl(): string | null {
+    return process.env.AVASETTLE_WEBHOOK_URL?.trim() || null;
+  }
+
+  get webhookSecret(): string | null {
+    return process.env.AVASETTLE_WEBHOOK_SECRET?.trim() || null;
+  }
+
+  get webhookRetryAttempts(): number {
+    return this.readInt('AVASETTLE_WEBHOOK_RETRY_ATTEMPTS', 3);
+  }
+
+  get autoSweep(): boolean {
+    return this.readBoolean('AVASETTLE_AUTO_SWEEP', false);
+  }
+
+  get autoReconcileIntervalSeconds(): number | null {
+    const value = process.env.AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS;
+    if (!value) return null;
+    const seconds = Number(value);
+    if (!Number.isInteger(seconds) || seconds < 10) {
+      throw new Error(
+        'AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS must be an integer >= 10.',
+      );
+    }
+    return seconds;
+  }
+
+  get throttleRps(): number {
+    return this.readInt('AVASETTLE_THROTTLE_RPS', 100);
+  }
+
   get treasuryPrivateKey(): `0x${string}` | null {
     const raw = process.env.AVASETTLE_TREASURY_PRIVATE_KEY;
     if (!raw) return null;
@@ -265,11 +291,7 @@ export class ConfigurationService {
   }
 
   private get apiKey(): string {
-    return (
-      process.env.AVASETTLE_API_KEY ??
-      process.env.CHAIN_FLOW_API_KEY ??
-      ''
-    ).trim();
+    return (process.env.AVASETTLE_API_KEY ?? '').trim();
   }
 
   private readAddress(name: string): `0x${string}` | null {

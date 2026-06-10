@@ -1,0 +1,67 @@
+{
+  "network": "avalanche-fuji",
+  "port": 3001,
+  "rpcUrl": null,
+  "explorerBaseUrl": null,
+  "corsOrigins": "*",
+
+  "storage": {
+    "driver": "json",
+    "filePath": "data/avasettle-ledger.json",
+    "database": {
+      "ssl": false,
+      "maxConnections": 5,
+      "runtimeStateKey": "default",
+      "autoMigrate": false
+    }
+  },
+
+  "payin": {
+    "lookbackBlocks": 50000,
+    "derivationAccount": 0,
+    "defaultExpirationMinutes": null,
+    "paymentRouterAddress": null
+  },
+
+  "assets": {
+    "enabled": ["USDC"],
+    "USDC": {
+      "address": null,
+      "decimals": 6,
+      "maxPayoutAmount": null
+    },
+    "USDT": {
+      "address": null,
+      "decimals": 6,
+      "maxPayoutAmount": null
+    }
+  },
+
+  "blockchain": {
+    "minConfirmations": 2,
+    "waitForReceipt": false
+  },
+
+  "settlement": {
+    "fiatCurrency": "USD",
+    "fiatRate": 1.0
+  },
+
+  "risk": {
+    "reviewAmount": 10000,
+    "rejectAmount": 50000
+  },
+
+  "webhook": {
+    "url": null,
+    "retryAttempts": 3
+  },
+
+  "autoReconcileIntervalSeconds": null,
+  "throttleRps": 100,
+
+  "privacy": {
+    "mode": "off",
+    "eercContractAddress": null
+  }
+}

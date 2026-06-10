@@ -66,6 +66,8 @@ export type PayInRecord = {
   updatedAt: string;
   detectedAt: string | null;
   confirmedAt: string | null;
+  acceptedAt: string | null;
+  acceptanceNote: string | null;
 };
 
 export type PayInResponse = PayInRecord & {

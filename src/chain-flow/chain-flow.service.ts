@@ -66,67 +66,65 @@ export class ChainFlowService {
   private resolvePayout(dto: ChainFlowEstadoRetiroDto): PayoutResponse {
     if (dto.payoutId) return this.payouts.getPayout(dto.payoutId);
 
-    const identifiers = this.statusLookupIdentifiers(dto);
+    // Try canonical identifiers in priority order
+    const identifiers = [
+      dto.tcTransaccionExterna,
+      dto.externalId,
+      dto.tnRetiroPago,
+      dto.tnTransferenciaBloque,
+    ]
+      .map((v) => this.normalizeIdentifier(v))
+      .filter((v): v is string => v !== null);
+
     if (identifiers.length === 0) {
       throw new BadRequestException(
-        'payoutId, tcTransaccionExterna, externalId, idRetiro, id_retiro, tnRetiroPago or tnTransferenciaBloque is required.',
+        'payoutId, tcTransaccionExterna, externalId, tnRetiroPago or tnTransferenciaBloque is required.',
       );
     }
 
-    for (const identifier of identifiers) {
-      const payout = this.tryGetPayoutByExternalId(identifier);
+    for (const id of identifiers) {
+      const payout = this.tryGetPayoutByExternalId(id);
       if (payout) return payout;
     }
 
-    const payoutByChainFlowMetadata = this.payouts
+    // Fallback: scan metadata for a ChainFlow field match
+    const payoutByMeta = this.payouts
       .listPayouts({})
-      .find((payout) => this.matchesChainFlowLookup(payout, identifiers));
-    if (payoutByChainFlowMetadata) return payoutByChainFlowMetadata;
+      .find((p) => this.matchesChainFlowLookup(p, identifiers));
+    if (payoutByMeta) return payoutByMeta;
 
+    // Final throw via externalId (will 404 with a clean message)
     return this.payouts.getPayoutByExternalId(identifiers[0]);
   }
 
   private toCreatePayoutDto(dto: ChainFlowRetiroDto): CreatePayoutDto {
+    // Primary ChainFlow fields, then AvaSettle-compatible fallbacks
     const externalId = this.normalizeIdentifier(
-      dto.tcTransaccionExterna ??
-        dto.externalId ??
-        dto.idRetiro ??
-        dto.id_retiro ??
-        dto.tnRetiroPago,
+      dto.tcTransaccionExterna ?? dto.externalId,
     );
-    const amount = this.normalizeIdentifier(
-      dto.tnMonto ?? dto.amount ?? dto.monto,
-    );
-    const asset = this.resolveAsset(dto.tnMoneda ?? dto.asset ?? dto.moneda);
-    const beneficiaryAddress =
-      dto.tcCuentaDestino ??
-      dto.beneficiaryAddress ??
-      dto.direccionDestino ??
-      dto.wallet;
+    const amount = this.normalizeIdentifier(dto.tnMonto ?? dto.amount);
+    const asset = this.resolveAsset(dto.tnMoneda ?? dto.asset);
+    const beneficiaryAddress = dto.tcCuentaDestino ?? dto.beneficiaryAddress;
     const chainFlowRequestId = this.normalizeIdentifier(
-      dto.idRetiro ??
-        dto.id_retiro ??
-        dto.tnRetiroPago ??
-        dto.tnTransferenciaBloque,
+      dto.tnRetiroPago ?? dto.tnTransferenciaBloque,
     );
 
     if (!externalId) {
       throw new BadRequestException(
-        'tcTransaccionExterna, externalId, idRetiro or tnRetiroPago is required.',
+        'tcTransaccionExterna or externalId is required.',
       );
     }
     if (!amount) {
-      throw new BadRequestException('tnMonto, amount or monto is required.');
+      throw new BadRequestException('tnMonto or amount is required.');
     }
     if (!beneficiaryAddress) {
       throw new BadRequestException(
-        'tcCuentaDestino, beneficiaryAddress, direccionDestino or wallet is required.',
+        'tcCuentaDestino or beneficiaryAddress is required.',
       );
     }
 
-    const sourceMetadata = dto.metadata ?? {};
     const chainFlowMetadata = {
-      ...this.asRecord(sourceMetadata.chainFlow),
+      ...this.asRecord((dto.metadata as Record<string, unknown>)?.chainFlow),
       ...this.compactRecord({
         tcTransaccionExterna: dto.tcTransaccionExterna,
         tnRetiroPago: dto.tnRetiroPago,
@@ -145,7 +143,7 @@ export class ChainFlowService {
       beneficiaryName: dto.beneficiario,
       chainFlowRequestId: chainFlowRequestId ?? undefined,
       metadata: {
-        ...sourceMetadata,
+        ...(dto.metadata as Record<string, unknown>),
         source: 'chain-flow-compat',
         chainFlow: chainFlowMetadata,
       },
@@ -172,15 +170,12 @@ export class ChainFlowService {
       retiroId: payout.externalId,
       payoutId: payout.id,
       estado: payout.status,
-      estadoAvaSettle: payout.status,
       estadoChainFlow: this.toChainFlowStatus(payout.status),
       txHash: payout.transactionHash,
       red: payout.network,
       chainId: payout.chainId,
       asset: payout.asset,
       monto: payout.amount,
-      montoAtomic: payout.amountAtomic,
-      beneficiario: payout.beneficiaryAddress,
       creadoEn: payout.createdAt,
       actualizadoEn: payout.updatedAt,
       risk,
@@ -196,25 +191,8 @@ export class ChainFlowService {
     if (normalized === 'USDC' || normalized === 'USDT') return normalized;
 
     throw new BadRequestException(
-      'tnMoneda/asset/moneda must be 1, 2, USDC or USDT.',
+      'tnMoneda/asset must be 1 (USDC), 2 (USDT), USDC or USDT.',
     );
-  }
-
-  private statusLookupIdentifiers(dto: ChainFlowEstadoRetiroDto): string[] {
-    return [
-      dto.tcTransaccionExterna,
-      dto.externalId,
-      dto.idRetiro,
-      dto.id_retiro,
-      dto.tnRetiroPago,
-      dto.tnTransferenciaBloque,
-    ].reduce<string[]>((identifiers, value) => {
-      const identifier = this.normalizeIdentifier(value);
-      if (identifier && !identifiers.includes(identifier)) {
-        identifiers.push(identifier);
-      }
-      return identifiers;
-    }, []);
   }
 
   private tryGetPayoutByExternalId(externalId: string): PayoutResponse | null {
@@ -237,10 +215,10 @@ export class ChainFlowService {
       chainFlow.tnRetiroPago,
       chainFlow.tnTransferenciaBloque,
     ]
-      .map((value) => this.normalizeIdentifier(value))
-      .filter((value): value is string => Boolean(value));
+      .map((v) => this.normalizeIdentifier(v))
+      .filter((v): v is string => v !== null);
 
-    return candidates.some((candidate) => identifiers.includes(candidate));
+    return candidates.some((c) => identifiers.includes(c));
   }
 
   private chainFlowMetadata(payout: PayoutResponse): Record<string, unknown> {

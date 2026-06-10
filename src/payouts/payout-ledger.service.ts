@@ -30,15 +30,19 @@ export class PayoutLedgerService {
   list(filters: {
     status?: PayoutStatus;
     externalId?: string;
+    limit?: number;
+    offset?: number;
   }): PayoutRecord[] {
-    const records = this.storage.snapshot.payouts;
-    return records
+    const sorted = this.storage.snapshot.payouts
       .filter((record) => !filters.status || record.status === filters.status)
       .filter(
         (record) =>
           !filters.externalId || record.externalId === filters.externalId,
       )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (filters.limit === undefined) return sorted;
+    const offset = filters.offset ?? 0;
+    return sorted.slice(offset, offset + filters.limit);
   }
 
   update(id: string, patch: Partial<PayoutRecord>): PayoutRecord | null {

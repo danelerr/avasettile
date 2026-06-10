@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -7,8 +8,11 @@ import {
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { AuditActor } from '../audit/audit.types';
+import { parseAtomicAmount } from '../blockchain/amount.utils';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { ConfigurationService } from '../configuration/configuration.service';
+import { AssetRuntimeConfig } from '../configuration/configuration.types';
+import { WebhookService } from '../webhooks/webhook.service';
 import { AuthorizePayoutDto } from './dto/authorize-payout.dto';
 import { CreatePayoutDto } from './dto/create-payout.dto';
 import { ListPayoutsQueryDto } from './dto/list-payouts-query.dto';
@@ -27,6 +31,7 @@ export class PayoutsService {
     private readonly blockchain: BlockchainService,
     private readonly configuration: ConfigurationService,
     private readonly ledger: PayoutLedgerService,
+    private readonly webhook: WebhookService,
   ) {}
 
   async createPayout(
@@ -45,7 +50,20 @@ export class PayoutsService {
     }
 
     const assetConfig = this.configuration.getAssetConfig(dto.asset);
-    const amountAtomic = this.blockchain.toAtomicAmount(dto.asset, dto.amount);
+    const amountAtomic = this.parseAmount(dto.amount, assetConfig);
+
+    if (assetConfig.maxPayoutAmount) {
+      const maxAtomic = parseAtomicAmount(
+        assetConfig.maxPayoutAmount,
+        assetConfig.decimals,
+      );
+      if (amountAtomic > maxAtomic) {
+        throw new BadRequestException(
+          `Payout exceeds configured max for ${dto.asset}.`,
+        );
+      }
+    }
+
     const now = new Date().toISOString();
     const record = this.ledger.create({
       id: randomUUID(),
@@ -180,6 +198,18 @@ export class PayoutsService {
         payload: { transactionHash: transfer.hash },
       });
 
+      if (status === PayoutStatus.Confirmed) {
+        void this.webhook.fire('payout.confirmed', {
+          id: updated.id,
+          externalId: updated.externalId,
+          asset: updated.asset,
+          amount: updated.amount,
+          beneficiaryAddress: updated.beneficiaryAddress,
+          transactionHash: updated.transactionHash,
+          confirmedAt: updated.confirmedAt,
+        });
+      }
+
       return this.toResponse(updated);
     } catch (error) {
       if (error instanceof ConflictException) {
@@ -260,6 +290,16 @@ export class PayoutsService {
     const payout = this.ledger.findById(id);
     if (!payout) throw new NotFoundException('Payout not found.');
     return payout;
+  }
+
+  private parseAmount(amount: string, assetConfig: AssetRuntimeConfig): bigint {
+    try {
+      return parseAtomicAmount(amount, assetConfig.decimals);
+    } catch (e) {
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'Invalid amount.',
+      );
+    }
   }
 
   private toResponse(

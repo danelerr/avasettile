@@ -18,7 +18,9 @@ export class SettlementService {
 
   create(dto: CreateSettlementDto, context: RequestContext): SettlementRecord {
     const fxRate = this.configuration.fiatSettlementRate;
-    const fiatAmount = Number(dto.cryptoAmount) * fxRate;
+    // Use integer-cent arithmetic to avoid floating-point rounding errors.
+    const fiatCents = Math.round(parseFloat(dto.cryptoAmount) * fxRate * 100);
+    const fiatAmount = (fiatCents / 100).toFixed(2);
     const now = new Date().toISOString();
     const record: SettlementRecord = {
       id: randomUUID(),
@@ -30,7 +32,7 @@ export class SettlementService {
       fiatCurrency:
         dto.fiatCurrency?.toUpperCase() ??
         this.configuration.fiatSettlementCurrency,
-      fiatAmount: fiatAmount.toFixed(2),
+      fiatAmount,
       fxRate: fxRate.toString(),
       rail: dto.rail ?? 'simulated-fiat-rail',
       reference: dto.reference ?? null,

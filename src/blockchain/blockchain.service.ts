@@ -8,6 +8,7 @@ import {
   Address,
   Chain,
   Hash,
+  PublicClient,
   createPublicClient,
   createWalletClient,
   erc20Abi,
@@ -17,11 +18,10 @@ import {
   http,
   isAddress,
   parseAbiItem,
-  parseUnits,
   stringToBytes,
   keccak256,
 } from 'viem';
-import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
+import { mnemonicToAccount } from 'viem/accounts';
 import { avalanche, avalancheFuji } from 'viem/chains';
 import { ConfigurationService } from '../configuration/configuration.service';
 import { SettlementAsset } from '../configuration/configuration.types';
@@ -34,10 +34,21 @@ import {
   TransferExecution,
   TreasuryBalance,
 } from './blockchain.types';
+import { TreasurySignerService } from './treasury-signer.service';
 
 @Injectable()
 export class BlockchainService {
-  constructor(private readonly configuration: ConfigurationService) {}
+  private readonly _publicClient: PublicClient;
+
+  constructor(
+    private readonly configuration: ConfigurationService,
+    private readonly treasury: TreasurySignerService,
+  ) {
+    this._publicClient = createPublicClient({
+      chain: this.chain,
+      transport: http(configuration.networkSummary.rpcUrl),
+    });
+  }
 
   get chain(): Chain {
     return this.configuration.settlementNetwork === 'avalanche-mainnet'
@@ -46,20 +57,15 @@ export class BlockchainService {
   }
 
   get treasuryAddress(): Address | null {
-    const privateKey = this.configuration.treasuryPrivateKey;
-    if (!privateKey) return null;
-    return privateKeyToAccount(privateKey).address;
-  }
-
-  get publicClient() {
-    return createPublicClient({
-      chain: this.chain,
-      transport: http(this.configuration.networkSummary.rpcUrl),
-    });
+    return this.treasury.address;
   }
 
   getLatestBlockNumber(): Promise<bigint> {
-    return this.publicClient.getBlockNumber();
+    return this._publicClient.getBlockNumber();
+  }
+
+  getChainId(): Promise<number> {
+    return this._publicClient.getChainId();
   }
 
   derivePayInAddress(index: number): Address {
@@ -84,39 +90,9 @@ export class BlockchainService {
     });
   }
 
-  toAtomicAmount(asset: SettlementAsset, amount: string): bigint {
-    const assetConfig = this.requireAsset(asset);
-
-    try {
-      const amountAtomic = parseUnits(amount, assetConfig.decimals);
-      if (amountAtomic <= 0n) {
-        throw new BadRequestException(
-          'Payout amount must be greater than zero.',
-        );
-      }
-
-      if (assetConfig.maxPayoutAmount) {
-        const maxAtomic = parseUnits(
-          assetConfig.maxPayoutAmount,
-          assetConfig.decimals,
-        );
-        if (amountAtomic > maxAtomic) {
-          throw new BadRequestException(
-            `Payout exceeds configured max for ${asset}.`,
-          );
-        }
-      }
-
-      return amountAtomic;
-    } catch (error) {
-      if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException(`Invalid ${asset} amount.`);
-    }
-  }
-
   async getNativeBalance(): Promise<NativeTreasuryBalance> {
     const treasuryAddress = this.requireTreasuryAddress();
-    const balance = await this.publicClient.getBalance({
+    const balance = await this._publicClient.getBalance({
       address: treasuryAddress,
     });
 
@@ -130,7 +106,7 @@ export class BlockchainService {
   async getNativeBalanceForAddress(
     address: Address,
   ): Promise<NativeTreasuryBalance> {
-    const balance = await this.publicClient.getBalance({ address });
+    const balance = await this._publicClient.getBalance({ address });
 
     return {
       asset: 'AVAX',
@@ -142,7 +118,7 @@ export class BlockchainService {
   async getAssetBalance(asset: SettlementAsset): Promise<TreasuryBalance> {
     const treasuryAddress = this.requireTreasuryAddress();
     const assetConfig = this.requireAsset(asset);
-    const balance = await this.publicClient.readContract({
+    const balance = await this._publicClient.readContract({
       address: assetConfig.address,
       abi: erc20Abi,
       functionName: 'balanceOf',
@@ -163,7 +139,7 @@ export class BlockchainService {
     address: Address;
   }): Promise<TreasuryBalance> {
     const assetConfig = this.requireAsset(input.asset);
-    const balance = await this.publicClient.readContract({
+    const balance = await this._publicClient.readContract({
       address: assetConfig.address,
       abi: erc20Abi,
       functionName: 'balanceOf',
@@ -185,32 +161,44 @@ export class BlockchainService {
     fromBlock: bigint;
   }): Promise<IncomingErc20Transfer[]> {
     const assetConfig = this.requireAsset(input.asset);
-    const latestBlock = await this.publicClient.getBlockNumber();
-    const configuredFromBlock =
+    const latestBlock = await this._publicClient.getBlockNumber();
+    const fromBlock =
       input.fromBlock > 0n
         ? input.fromBlock
-        : latestBlock - this.configuration.payInLookbackBlocks;
-    const fromBlock = configuredFromBlock > 0n ? configuredFromBlock : 0n;
+        : latestBlock > this.configuration.payInLookbackBlocks
+          ? latestBlock - this.configuration.payInLookbackBlocks
+          : 0n;
+
     const transferEvent = parseAbiItem(
       'event Transfer(address indexed from, address indexed to, uint256 value)',
     );
-    const logs = await this.publicClient.getLogs({
-      address: assetConfig.address,
-      event: transferEvent,
-      args: {
-        to: input.to,
-      },
+
+    type TransferLog = {
+      transactionHash: `0x${string}` | null;
+      blockNumber: bigint | null;
+      args: { from?: `0x${string}`; to?: `0x${string}`; value?: bigint };
+    };
+
+    const logs = await this.paginateLogs<TransferLog>(
       fromBlock,
-      toBlock: 'latest',
-    });
+      latestBlock,
+      (from, to) =>
+        this._publicClient.getLogs({
+          address: assetConfig.address,
+          event: transferEvent,
+          args: { to: input.to },
+          fromBlock: from,
+          toBlock: to,
+        }) as Promise<TransferLog[]>,
+    );
 
     return logs.map((log) => ({
-      hash: log.transactionHash,
-      from: log.args.from as `0x${string}`,
-      to: log.args.to as `0x${string}`,
+      hash: (log.transactionHash ?? '0x') as `0x${string}`,
+      from: (log.args.from ?? '0x') as `0x${string}`,
+      to: (log.args.to ?? '0x') as `0x${string}`,
       amountAtomic: (log.args.value ?? 0n).toString(),
       amount: formatUnits(log.args.value ?? 0n, assetConfig.decimals),
-      blockNumber: log.blockNumber.toString(),
+      blockNumber: (log.blockNumber ?? 0n).toString(),
     }));
   }
 
@@ -227,37 +215,57 @@ export class BlockchainService {
     }
 
     const assetConfig = this.requireAsset(input.asset);
-    const latestBlock = await this.publicClient.getBlockNumber();
-    const configuredFromBlock =
+    const latestBlock = await this._publicClient.getBlockNumber();
+    const fromBlock =
       input.fromBlock > 0n
         ? input.fromBlock
-        : latestBlock - this.configuration.payInLookbackBlocks;
-    const fromBlock = configuredFromBlock > 0n ? configuredFromBlock : 0n;
+        : latestBlock > this.configuration.payInLookbackBlocks
+          ? latestBlock - this.configuration.payInLookbackBlocks
+          : 0n;
+
     const invoicePaidEvent = parseAbiItem(
       'event InvoicePaid(bytes32 indexed invoiceId, address indexed payer, address indexed token, uint256 amount, address treasury, bytes metadata)',
     );
-    const logs = await this.publicClient.getLogs({
-      address: routerAddress,
-      event: invoicePaidEvent,
+
+    type InvoiceLog = {
+      transactionHash: `0x${string}` | null;
+      blockNumber: bigint | null;
       args: {
-        invoiceId: input.invoiceId,
-        token: assetConfig.address,
-      },
+        invoiceId?: `0x${string}`;
+        payer?: `0x${string}`;
+        token?: `0x${string}`;
+        amount?: bigint;
+        treasury?: `0x${string}`;
+      };
+    };
+
+    const logs = await this.paginateLogs<InvoiceLog>(
       fromBlock,
-      toBlock: 'latest',
-    });
+      latestBlock,
+      (from, to) =>
+        this._publicClient.getLogs({
+          address: routerAddress,
+          event: invoicePaidEvent,
+          args: {
+            invoiceId: input.invoiceId,
+            token: assetConfig.address,
+          },
+          fromBlock: from,
+          toBlock: to,
+        }) as Promise<InvoiceLog[]>,
+    );
 
     return logs.map((log) => ({
-      hash: log.transactionHash,
-      invoiceId: log.args.invoiceId as `0x${string}`,
-      payer: log.args.payer as `0x${string}`,
-      from: log.args.payer as `0x${string}`,
-      to: log.args.treasury as `0x${string}`,
-      token: log.args.token as `0x${string}`,
-      treasury: log.args.treasury as `0x${string}`,
+      hash: (log.transactionHash ?? '0x') as `0x${string}`,
+      invoiceId: (log.args.invoiceId ?? '0x') as `0x${string}`,
+      payer: (log.args.payer ?? '0x') as `0x${string}`,
+      from: (log.args.payer ?? '0x') as `0x${string}`,
+      to: (log.args.treasury ?? '0x') as `0x${string}`,
+      token: (log.args.token ?? '0x') as `0x${string}`,
+      treasury: (log.args.treasury ?? '0x') as `0x${string}`,
       amountAtomic: (log.args.amount ?? 0n).toString(),
       amount: formatUnits(log.args.amount ?? 0n, assetConfig.decimals),
-      blockNumber: log.blockNumber.toString(),
+      blockNumber: (log.blockNumber ?? 0n).toString(),
     }));
   }
 
@@ -279,7 +287,7 @@ export class BlockchainService {
       );
     }
 
-    const nativeBalance = await this.publicClient.getBalance({
+    const nativeBalance = await this._publicClient.getBalance({
       address: account.address,
     });
     if (nativeBalance === 0n) {
@@ -289,7 +297,7 @@ export class BlockchainService {
     }
 
     const assetConfig = this.requireAsset(input.asset);
-    const tokenBalance = await this.publicClient.readContract({
+    const tokenBalance = await this._publicClient.readContract({
       address: assetConfig.address,
       abi: erc20Abi,
       functionName: 'balanceOf',
@@ -313,14 +321,6 @@ export class BlockchainService {
       transport: http(this.configuration.networkSummary.rpcUrl),
     });
 
-    await this.publicClient.simulateContract({
-      account,
-      address: assetConfig.address,
-      abi: erc20Abi,
-      functionName: 'transfer',
-      args: [treasuryAddress, amountAtomic],
-    });
-
     const hash = await walletClient.writeContract({
       address: assetConfig.address,
       abi: erc20Abi,
@@ -340,7 +340,7 @@ export class BlockchainService {
       };
     }
 
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await this._publicClient.waitForTransactionReceipt({ hash });
     return {
       hash,
       status: receipt.status === 'success' ? 'confirmed' : 'broadcasted',
@@ -364,27 +364,12 @@ export class BlockchainService {
       );
     }
 
-    const privateKey = this.configuration.treasuryPrivateKey;
-    if (!privateKey) {
-      throw new ServiceUnavailableException(
-        'AvaSettle treasury private key is not configured.',
-      );
-    }
-
-    const account = privateKeyToAccount(privateKey);
+    const account = this.treasury.requireAccount();
     const assetConfig = this.requireAsset(input.asset);
     const walletClient = createWalletClient({
       account,
       chain: this.chain,
       transport: http(this.configuration.networkSummary.rpcUrl),
-    });
-
-    await this.publicClient.simulateContract({
-      account,
-      address: assetConfig.address,
-      abi: erc20Abi,
-      functionName: 'transfer',
-      args: [input.to, input.amountAtomic],
     });
 
     const hash = await walletClient.writeContract({
@@ -401,7 +386,7 @@ export class BlockchainService {
       };
     }
 
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await this._publicClient.waitForTransactionReceipt({ hash });
     return {
       hash,
       status: receipt.status === 'success' ? 'confirmed' : 'broadcasted',
@@ -409,8 +394,49 @@ export class BlockchainService {
     };
   }
 
+  async sendNativeTransfer(
+    to: Address,
+    amountWei: bigint,
+  ): Promise<{ hash: Hash; status: 'broadcasted' | 'confirmed' }> {
+    if (!isAddress(to)) {
+      throw new BadRequestException('Recipient is not a valid EVM address.');
+    }
+
+    const account = this.treasury.requireAccount();
+    const walletClient = createWalletClient({
+      account,
+      chain: this.chain,
+      transport: http(this.configuration.networkSummary.rpcUrl),
+    });
+
+    const nativeBalance = await this._publicClient.getBalance({
+      address: account.address,
+    });
+    if (nativeBalance < amountWei) {
+      throw new ConflictException('Treasury has insufficient AVAX balance for top-up.');
+    }
+
+    const hash = await walletClient.sendTransaction({ to, value: amountWei });
+
+    if (!this.configuration.waitForReceipt) {
+      return { hash, status: 'broadcasted' };
+    }
+
+    const receipt = await this._publicClient.waitForTransactionReceipt({ hash });
+    return {
+      hash,
+      status: receipt.status === 'success' ? 'confirmed' : 'broadcasted',
+    };
+  }
+
+  waitForTransaction(hash: Hash): Promise<void> {
+    return this._publicClient
+      .waitForTransactionReceipt({ hash })
+      .then(() => undefined);
+  }
+
   async reconcileTransaction(hash: Hash): Promise<TransactionReconciliation> {
-    const receipt = await this.publicClient
+    const receipt = await this._publicClient
       .getTransactionReceipt({ hash })
       .catch(() => null);
     if (!receipt) {
@@ -424,10 +450,10 @@ export class BlockchainService {
       };
     }
 
-    const latestBlock = await this.publicClient.getBlockNumber();
+    const latestBlock = await this._publicClient.getBlockNumber();
     const confirmations =
-      latestBlock >= receipt.blockNumber
-        ? Number(latestBlock - receipt.blockNumber + 1n)
+      latestBlock > receipt.blockNumber
+        ? Number(latestBlock - receipt.blockNumber)
         : 0;
 
     return {
@@ -442,15 +468,31 @@ export class BlockchainService {
     };
   }
 
+  private async paginateLogs<T>(
+    fromBlock: bigint,
+    toBlock: bigint,
+    fetchChunk: (from: bigint, to: bigint) => Promise<T[]>,
+    chunkSize = 2_000n,
+  ): Promise<T[]> {
+    if (fromBlock > toBlock) return [];
+    const results: T[] = [];
+    for (let from = fromBlock; from <= toBlock; from += chunkSize) {
+      const to =
+        from + chunkSize - 1n < toBlock ? from + chunkSize - 1n : toBlock;
+      const chunk = await fetchChunk(from, to);
+      results.push(...chunk);
+    }
+    return results;
+  }
+
   private requireTreasuryAddress(): Address {
-    const treasuryAddress = this.treasuryAddress;
-    if (!treasuryAddress) {
+    const addr = this.treasury.address;
+    if (!addr) {
       throw new ServiceUnavailableException(
         'AvaSettle treasury private key is not configured.',
       );
     }
-
-    return treasuryAddress;
+    return addr;
   }
 
   private requireAsset(asset: SettlementAsset) {

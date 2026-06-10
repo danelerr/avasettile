@@ -16,7 +16,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
-import { RequestContext } from '../payouts/payout.types';
+import { extractRequestContext } from '../common/request-context.util';
 import { ChainFlowService } from './chain-flow.service';
 import {
   ChainFlowEstadoRetiroDto,
@@ -64,7 +64,7 @@ export class ChainFlowController {
   ) {
     return this.chainFlow.prepararRetiro(
       dto,
-      this.toRequestContext(headers, sourceIp),
+      extractRequestContext(headers, sourceIp, 'chain-flow'),
     );
   }
 
@@ -82,15 +82,13 @@ export class ChainFlowController {
   ) {
     return this.chainFlow.autorizarRetiro(
       dto,
-      this.toRequestContext(headers, sourceIp),
+      extractRequestContext(headers, sourceIp, 'chain-flow'),
     );
   }
 
   @Get('consultarestadoretiro')
   @ApiOperation({
-    summary: 'Chain Flow compatible payout status query',
-    description:
-      'GET variant for providers that query withdrawal status with query string parameters.',
+    summary: 'Chain Flow compatible payout status query (GET)',
   })
   consultarEstadoRetiroGet(@Query() query: ChainFlowEstadoRetiroDto) {
     return this.chainFlow.consultarEstadoRetiro(query);
@@ -98,30 +96,10 @@ export class ChainFlowController {
 
   @Post('consultarestadoretiro')
   @ApiOperation({
-    summary: 'Chain Flow compatible payout status query',
-    description:
-      'POST variant for providers that query withdrawal status with a JSON body.',
+    summary: 'Chain Flow compatible payout status query (POST)',
   })
   @ApiBody({ type: ChainFlowEstadoRetiroDto })
   consultarEstadoRetiroPost(@Body() dto: ChainFlowEstadoRetiroDto) {
     return this.chainFlow.consultarEstadoRetiro(dto);
-  }
-
-  private toRequestContext(
-    headers: Record<string, string | string[] | undefined>,
-    sourceIp: string,
-  ): RequestContext {
-    return {
-      institutionId: this.firstHeader(headers['x-institution-id']),
-      correlationId: this.firstHeader(headers['x-correlation-id']),
-      idempotencyKey: this.firstHeader(headers['idempotency-key']),
-      actor: 'chain-flow',
-      sourceIp,
-    };
-  }
-
-  private firstHeader(value: string | string[] | undefined): string | null {
-    if (Array.isArray(value)) return value[0] ?? null;
-    return value ?? null;
   }
 }

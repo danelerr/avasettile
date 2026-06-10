@@ -34,7 +34,7 @@ export class HealthService {
     };
 
     try {
-      const chainId = await this.blockchain.publicClient.getChainId();
+      const chainId = await this.blockchain.getChainId();
       checks.rpcReachable =
         chainId === this.configuration.networkSummary.chainId;
     } catch {

@@ -2,7 +2,9 @@ import { ConflictException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import { ConfigurationService } from '../configuration/configuration.service';
+import { DatabaseService } from '../database/database.service';
 import { RequestContext } from '../payouts/payout.types';
+import { WebhookService } from '../webhooks/webhook.service';
 import { PayInLedgerService } from './payin-ledger.service';
 import { PayinsService } from './payins.service';
 import {
@@ -52,6 +54,8 @@ const payin: PayInRecord = {
   updatedAt: '2026-05-17T00:00:00.000Z',
   detectedAt: '2026-05-17T00:00:00.000Z',
   confirmedAt: '2026-05-17T00:00:00.000Z',
+  acceptedAt: null,
+  acceptanceNote: null,
 };
 
 describe('PayinsService', () => {
@@ -68,11 +72,15 @@ describe('PayinsService', () => {
   };
   const configuration = {
     paymentRouterAddress: '0x2222222222222222222222222222222222222222',
+    storageDriver: 'json',
   };
+  const database = { claimNextPayInIndex: jest.fn().mockResolvedValue(null) };
   const ledger = {
     findById: jest.fn<PayInRecord | null, [string]>(),
     update: jest.fn<PayInRecord | null, [string, Partial<PayInRecord>]>(),
   };
+
+  const webhook = { fire: jest.fn().mockResolvedValue(undefined) };
 
   let service: PayinsService;
 
@@ -97,7 +105,9 @@ describe('PayinsService', () => {
       audit as unknown as AuditService,
       blockchain as unknown as BlockchainService,
       configuration as unknown as ConfigurationService,
+      database as unknown as DatabaseService,
       ledger as unknown as PayInLedgerService,
+      webhook as unknown as WebhookService,
     );
   });
 

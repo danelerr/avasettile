@@ -16,4 +16,5 @@ export type StorageState = {
   settlements: SettlementRecord[];
   privateSettlements: PrivateSettlementRecord[];
   counters: StorageCounters;
+  idempotencyKeys: Record<string, string>;
 };
