@@ -15,7 +15,8 @@ import {
 } from './payins.types';
 
 const context: RequestContext = {
-  institutionId: 'institution-1',
+  clientId: 'client-1',
+  clientName: 'Fintech LATAM SA',
   correlationId: 'corr-1',
   idempotencyKey: null,
   actor: 'ops',
@@ -24,6 +25,7 @@ const context: RequestContext = {
 
 const payin: PayInRecord = {
   id: 'payin-id',
+  clientId: 'client-1',
   externalId: 'PAYIN-1',
   chainFlowRequestId: null,
   status: PayInStatus.Confirmed,
@@ -60,24 +62,26 @@ const payin: PayInRecord = {
 
 describe('PayinsService', () => {
   const audit = {
-    record: jest.fn(),
-    listBySubject: jest.fn<
-      ReturnType<AuditService['listBySubject']>,
-      [string]
-    >(),
+    record: jest.fn().mockResolvedValue(undefined),
+    listBySubject: jest.fn().mockResolvedValue([]),
   };
   const blockchain = {
     sweepDerivedPayIn: jest.fn(),
-    toAtomicAmount: jest.fn(),
   };
   const configuration = {
     paymentRouterAddress: '0x2222222222222222222222222222222222222222',
-    storageDriver: 'json',
+    getAssetConfig: jest.fn().mockReturnValue({
+      symbol: 'USDC',
+      address: '0x5425890298aed601595a70ab815c96711a31bc65',
+      decimals: 6,
+      maxPayoutAmount: null,
+      configured: true,
+    }),
   };
-  const database = { claimNextPayInIndex: jest.fn().mockResolvedValue(null) };
+  const database = { claimNextPayInIndex: jest.fn().mockResolvedValue(7) };
   const ledger = {
-    findById: jest.fn<PayInRecord | null, [string]>(),
-    update: jest.fn<PayInRecord | null, [string, Partial<PayInRecord>]>(),
+    findById: jest.fn(),
+    update: jest.fn(),
   };
 
   const webhook = { fire: jest.fn().mockResolvedValue(undefined) };
@@ -85,13 +89,14 @@ describe('PayinsService', () => {
   let service: PayinsService;
 
   beforeEach(() => {
-    jest.resetAllMocks();
-    audit.listBySubject.mockReturnValue([]);
-    ledger.findById.mockReturnValue(payin);
-    ledger.update.mockImplementation((_id, patch) => ({
-      ...payin,
-      ...patch,
-    }));
+    jest.clearAllMocks();
+    audit.record.mockResolvedValue(undefined);
+    audit.listBySubject.mockResolvedValue([]);
+    ledger.findById.mockResolvedValue(payin);
+    ledger.update.mockImplementation(
+      (_id: string, patch: Partial<PayInRecord>) =>
+        Promise.resolve({ ...payin, ...patch }),
+    );
     blockchain.sweepDerivedPayIn.mockResolvedValue({
       hash: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       status: 'broadcasted',
@@ -114,6 +119,7 @@ describe('PayinsService', () => {
   it('sweeps a derived pay-in address into treasury', async () => {
     const response = await service.sweepPayIn('payin-id', {}, context);
 
+    expect(ledger.findById).toHaveBeenCalledWith('payin-id', 'client-1');
     expect(blockchain.sweepDerivedPayIn).toHaveBeenCalledWith({
       asset: 'USDC',
       derivationIndex: 7,
@@ -134,7 +140,7 @@ describe('PayinsService', () => {
   });
 
   it('marks router pay-ins as not requiring sweep', async () => {
-    ledger.findById.mockReturnValue({
+    ledger.findById.mockResolvedValue({
       ...payin,
       collectionMode: PayInCollectionMode.PaymentRouter,
       routerAddress: '0x2222222222222222222222222222222222222222',

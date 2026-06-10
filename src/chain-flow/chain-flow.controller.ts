@@ -2,10 +2,9 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
-  Ip,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -15,7 +14,8 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
+import { ClientApiKeyGuard } from '../auth/client-api-key.guard';
+import type { AuthenticatedRequest } from '../auth/client-api-key.guard';
 import { extractRequestContext } from '../common/request-context.util';
 import { ChainFlowService } from './chain-flow.service';
 import {
@@ -27,7 +27,7 @@ import {
 @ApiSecurity('avasettle-api-key')
 @ApiSecurity('chain-flow-bearer')
 @Controller('api')
-@UseGuards(ApiKeyGuard)
+@UseGuards(ClientApiKeyGuard)
 export class ChainFlowController {
   constructor(private readonly chainFlow: ChainFlowService) {}
 
@@ -59,12 +59,11 @@ export class ChainFlowController {
   })
   prepararRetiro(
     @Body() dto: ChainFlowRetiroDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
     return this.chainFlow.prepararRetiro(
       dto,
-      extractRequestContext(headers, sourceIp, 'chain-flow'),
+      extractRequestContext(request, 'chain-flow'),
     );
   }
 
@@ -77,12 +76,11 @@ export class ChainFlowController {
   @ApiBody({ type: ChainFlowEstadoRetiroDto })
   autorizarRetiro(
     @Body() dto: ChainFlowEstadoRetiroDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
     return this.chainFlow.autorizarRetiro(
       dto,
-      extractRequestContext(headers, sourceIp, 'chain-flow'),
+      extractRequestContext(request, 'chain-flow'),
     );
   }
 
@@ -90,8 +88,14 @@ export class ChainFlowController {
   @ApiOperation({
     summary: 'Chain Flow compatible payout status query (GET)',
   })
-  consultarEstadoRetiroGet(@Query() query: ChainFlowEstadoRetiroDto) {
-    return this.chainFlow.consultarEstadoRetiro(query);
+  consultarEstadoRetiroGet(
+    @Query() query: ChainFlowEstadoRetiroDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.chainFlow.consultarEstadoRetiro(
+      query,
+      extractRequestContext(request, 'chain-flow'),
+    );
   }
 
   @Post('consultarestadoretiro')
@@ -99,7 +103,13 @@ export class ChainFlowController {
     summary: 'Chain Flow compatible payout status query (POST)',
   })
   @ApiBody({ type: ChainFlowEstadoRetiroDto })
-  consultarEstadoRetiroPost(@Body() dto: ChainFlowEstadoRetiroDto) {
-    return this.chainFlow.consultarEstadoRetiro(dto);
+  consultarEstadoRetiroPost(
+    @Body() dto: ChainFlowEstadoRetiroDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.chainFlow.consultarEstadoRetiro(
+      dto,
+      extractRequestContext(request, 'chain-flow'),
+    );
   }
 }

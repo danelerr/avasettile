@@ -36,6 +36,7 @@ export type PayInTransferRecord = {
 
 export type PayInRecord = {
   id: string;
+  clientId: string | null;
   externalId: string;
   chainFlowRequestId: string | null;
   status: PayInStatus;

@@ -189,13 +189,13 @@ export class BlockchainService {
           args: { to: input.to },
           fromBlock: from,
           toBlock: to,
-        }) as Promise<TransferLog[]>,
+        }),
     );
 
     return logs.map((log) => ({
-      hash: (log.transactionHash ?? '0x') as `0x${string}`,
-      from: (log.args.from ?? '0x') as `0x${string}`,
-      to: (log.args.to ?? '0x') as `0x${string}`,
+      hash: log.transactionHash ?? '0x',
+      from: log.args.from ?? '0x',
+      to: log.args.to ?? '0x',
       amountAtomic: (log.args.value ?? 0n).toString(),
       amount: formatUnits(log.args.value ?? 0n, assetConfig.decimals),
       blockNumber: (log.blockNumber ?? 0n).toString(),
@@ -252,17 +252,17 @@ export class BlockchainService {
           },
           fromBlock: from,
           toBlock: to,
-        }) as Promise<InvoiceLog[]>,
+        }),
     );
 
     return logs.map((log) => ({
-      hash: (log.transactionHash ?? '0x') as `0x${string}`,
-      invoiceId: (log.args.invoiceId ?? '0x') as `0x${string}`,
-      payer: (log.args.payer ?? '0x') as `0x${string}`,
-      from: (log.args.payer ?? '0x') as `0x${string}`,
-      to: (log.args.treasury ?? '0x') as `0x${string}`,
-      token: (log.args.token ?? '0x') as `0x${string}`,
-      treasury: (log.args.treasury ?? '0x') as `0x${string}`,
+      hash: log.transactionHash ?? '0x',
+      invoiceId: log.args.invoiceId ?? '0x',
+      payer: log.args.payer ?? '0x',
+      from: log.args.payer ?? '0x',
+      to: log.args.treasury ?? '0x',
+      token: log.args.token ?? '0x',
+      treasury: log.args.treasury ?? '0x',
       amountAtomic: (log.args.amount ?? 0n).toString(),
       amount: formatUnits(log.args.amount ?? 0n, assetConfig.decimals),
       blockNumber: (log.blockNumber ?? 0n).toString(),
@@ -340,7 +340,9 @@ export class BlockchainService {
       };
     }
 
-    const receipt = await this._publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await this._publicClient.waitForTransactionReceipt({
+      hash,
+    });
     return {
       hash,
       status: receipt.status === 'success' ? 'confirmed' : 'broadcasted',
@@ -386,7 +388,9 @@ export class BlockchainService {
       };
     }
 
-    const receipt = await this._publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await this._publicClient.waitForTransactionReceipt({
+      hash,
+    });
     return {
       hash,
       status: receipt.status === 'success' ? 'confirmed' : 'broadcasted',
@@ -413,7 +417,9 @@ export class BlockchainService {
       address: account.address,
     });
     if (nativeBalance < amountWei) {
-      throw new ConflictException('Treasury has insufficient AVAX balance for top-up.');
+      throw new ConflictException(
+        'Treasury has insufficient AVAX balance for top-up.',
+      );
     }
 
     const hash = await walletClient.sendTransaction({ to, value: amountWei });
@@ -422,7 +428,9 @@ export class BlockchainService {
       return { hash, status: 'broadcasted' };
     }
 
-    const receipt = await this._publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await this._publicClient.waitForTransactionReceipt({
+      hash,
+    });
     return {
       hash,
       status: receipt.status === 'success' ? 'confirmed' : 'broadcasted',

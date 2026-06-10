@@ -12,10 +12,7 @@ export class ThrottleMiddleware implements NestMiddleware {
 
   constructor(private readonly configuration: ConfigurationService) {
     // Prune stale entries every 60 seconds to avoid unbounded memory growth.
-    this.cleanupTimer = setInterval(
-      () => this.prune(),
-      60_000,
-    );
+    this.cleanupTimer = setInterval(() => this.prune(), 60_000);
     this.cleanupTimer.unref?.();
   }
 

@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { AuditEvent } from '../audit/audit.types';
+import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../database/database.service';
 import { PayInStatus, PayInSweepStatus } from '../payins/payins.types';
-import { StorageService } from '../storage/storage.service';
+import { WebhookService } from '../webhooks/webhook.service';
 import {
   AssetVolume,
   AuditTrailReport,
@@ -16,90 +16,145 @@ import {
 @Injectable()
 export class ReportsService {
   constructor(
-    private readonly storage: StorageService,
+    private readonly audit: AuditService,
     private readonly database: DatabaseService,
+    private readonly webhooks: WebhookService,
   ) {}
 
-  getInstitutionalSummary(): InstitutionalSummaryReport {
-    const snapshot = this.storage.snapshot;
+  async getInstitutionalSummary(
+    clientId: string,
+  ): Promise<InstitutionalSummaryReport> {
+    const [payoutRows, payinRows] = await Promise.all([
+      this.database.query<{
+        status: string;
+        asset: string;
+        count: string;
+        volume: string | null;
+      }>(
+        `SELECT status, asset, count(*) AS count, sum(amount::numeric) AS volume
+         FROM avasettle_payouts
+         WHERE client_id = $1
+         GROUP BY status, asset`,
+        [clientId],
+      ),
+      this.database.query<{
+        status: string;
+        collection_mode: string;
+        sweep_status: string;
+        asset: string;
+        count: string;
+        expected_volume: string | null;
+        received_volume: string | null;
+        swept_volume: string | null;
+      }>(
+        `SELECT status, collection_mode, sweep_status, asset, count(*) AS count,
+                sum(expected_amount::numeric) AS expected_volume,
+                sum(received_amount::numeric) AS received_volume,
+                sum(swept_amount::numeric)    AS swept_volume
+         FROM avasettle_payins
+         WHERE client_id = $1
+         GROUP BY status, collection_mode, sweep_status, asset`,
+        [clientId],
+      ),
+    ]);
+
+    const payoutsByStatus: ReportBucket = {};
+    const payoutVolumeByAsset: Record<string, number> = {};
+    let payoutCount = 0;
+    for (const row of payoutRows.rows) {
+      const count = parseInt(row.count, 10);
+      payoutCount += count;
+      payoutsByStatus[row.status] = (payoutsByStatus[row.status] ?? 0) + count;
+      payoutVolumeByAsset[row.asset] =
+        (payoutVolumeByAsset[row.asset] ?? 0) + Number(row.volume ?? 0);
+    }
+
+    const payinsByStatus: ReportBucket = {};
+    const payinsByCollectionMode: ReportBucket = {};
+    const payinsBySweepStatus: ReportBucket = {};
+    const expectedByAsset: Record<string, number> = {};
+    const receivedByAsset: Record<string, number> = {};
+    const sweptByAsset: Record<string, number> = {};
+    let payinCount = 0;
+    for (const row of payinRows.rows) {
+      const count = parseInt(row.count, 10);
+      payinCount += count;
+      payinsByStatus[row.status] = (payinsByStatus[row.status] ?? 0) + count;
+      payinsByCollectionMode[row.collection_mode] =
+        (payinsByCollectionMode[row.collection_mode] ?? 0) + count;
+      payinsBySweepStatus[row.sweep_status] =
+        (payinsBySweepStatus[row.sweep_status] ?? 0) + count;
+      expectedByAsset[row.asset] =
+        (expectedByAsset[row.asset] ?? 0) + Number(row.expected_volume ?? 0);
+      receivedByAsset[row.asset] =
+        (receivedByAsset[row.asset] ?? 0) + Number(row.received_volume ?? 0);
+      sweptByAsset[row.asset] =
+        (sweptByAsset[row.asset] ?? 0) + Number(row.swept_volume ?? 0);
+    }
+
     return {
       generatedAt: new Date().toISOString(),
       payouts: {
-        count: snapshot.payouts.length,
-        byStatus: this.countBy(snapshot.payouts, (item) => item.status),
-        volumeByAsset: this.sumBy(
-          snapshot.payouts,
-          (item) => item.asset,
-          (item) => item.amount,
-        ),
+        count: payoutCount,
+        byStatus: payoutsByStatus,
+        volumeByAsset: toFixedVolumes(payoutVolumeByAsset),
       },
       payins: {
-        count: snapshot.payins.length,
-        byStatus: this.countBy(snapshot.payins, (item) => item.status),
-        byCollectionMode: this.countBy(
-          snapshot.payins,
-          (item) => item.collectionMode ?? 'derived-address',
-        ),
-        bySweepStatus: this.countBy(
-          snapshot.payins,
-          (item) => item.sweepStatus ?? 'pending',
-        ),
-        expectedVolumeByAsset: this.sumBy(
-          snapshot.payins,
-          (item) => item.asset,
-          (item) => item.expectedAmount,
-        ),
-        receivedVolumeByAsset: this.sumBy(
-          snapshot.payins,
-          (item) => item.asset,
-          (item) => item.receivedAmount,
-        ),
-        sweptVolumeByAsset: this.sumBy(
-          snapshot.payins,
-          (item) => item.asset,
-          (item) => item.sweptAmount ?? '0',
-        ),
-      },
-      settlements: {
-        count: snapshot.settlements.length,
-        byStatus: this.countBy(snapshot.settlements, (item) => item.status),
-        fiatVolumeByCurrency: this.sumBy(
-          snapshot.settlements,
-          (item) => item.fiatCurrency,
-          (item) => item.fiatAmount,
-        ),
-      },
-      privateSettlements: {
-        count: snapshot.privateSettlements.length,
-        byStatus: this.countBy(
-          snapshot.privateSettlements,
-          (item) => item.status,
-        ),
-        byMode: this.countBy(snapshot.privateSettlements, (item) => item.mode),
+        count: payinCount,
+        byStatus: payinsByStatus,
+        byCollectionMode: payinsByCollectionMode,
+        bySweepStatus: payinsBySweepStatus,
+        expectedVolumeByAsset: toFixedVolumes(expectedByAsset),
+        receivedVolumeByAsset: toFixedVolumes(receivedByAsset),
+        sweptVolumeByAsset: toFixedVolumes(sweptByAsset),
       },
     };
   }
 
-  getSweepQueue(): SweepQueueReport {
-    const items: SweepQueueItem[] = this.storage.snapshot.payins
-      .filter(
-        (p) =>
-          p.status === PayInStatus.Confirmed &&
-          (p.sweepStatus === PayInSweepStatus.Pending ||
-            p.sweepStatus === PayInSweepStatus.Failed),
-      )
-      .sort((a, b) => (a.confirmedAt ?? '').localeCompare(b.confirmedAt ?? ''))
-      .map((p) => ({
-        id: p.id,
-        externalId: p.externalId,
-        depositAddress: p.depositAddress,
-        asset: p.asset,
-        receivedAmount: p.receivedAmount,
-        receivedAmountAtomic: p.receivedAmountAtomic,
-        sweepStatus: p.sweepStatus,
-        sweepFailureReason: p.sweepFailureReason,
-        confirmedAt: p.confirmedAt,
-      }));
+  /**
+   * Operational view across all clients: confirmed pay-ins whose funds are
+   * still sitting on deposit addresses. Admin-only.
+   */
+  async getSweepQueue(): Promise<SweepQueueReport> {
+    const result = await this.database.query<{
+      id: string;
+      client_id: string | null;
+      external_id: string;
+      deposit_address: string;
+      asset: string;
+      received_amount: string;
+      received_amount_atomic: string;
+      sweep_status: string;
+      sweep_failure_reason: string | null;
+      confirmed_at: Date | null;
+    }>(
+      `SELECT id, client_id, external_id, deposit_address, asset,
+              received_amount, received_amount_atomic,
+              sweep_status, sweep_failure_reason, confirmed_at
+       FROM avasettle_payins
+       WHERE status = $1 AND sweep_status IN ($2, $3)
+       ORDER BY confirmed_at ASC NULLS LAST`,
+      [
+        PayInStatus.Confirmed,
+        PayInSweepStatus.Pending,
+        PayInSweepStatus.Failed,
+      ],
+    );
+
+    const items: SweepQueueItem[] = result.rows.map((row) => ({
+      id: row.id,
+      clientId: row.client_id,
+      externalId: row.external_id,
+      depositAddress: row.deposit_address,
+      asset: row.asset,
+      receivedAmount: row.received_amount,
+      receivedAmountAtomic: row.received_amount_atomic,
+      sweepStatus: row.sweep_status,
+      sweepFailureReason: row.sweep_failure_reason,
+      confirmedAt: row.confirmed_at
+        ? new Date(row.confirmed_at).toISOString()
+        : null,
+    }));
 
     return {
       generatedAt: new Date().toISOString(),
@@ -109,10 +164,12 @@ export class ReportsService {
   }
 
   async getWebhookDeliveries(
+    clientId: string,
     limit: number,
     onlyFailed?: boolean,
   ): Promise<WebhookDeliveriesReport> {
-    const items = await this.database.loadRecentWebhookDeliveries(
+    const items = await this.webhooks.listRecentDeliveries(
+      clientId,
       Math.min(limit, 500),
       onlyFailed,
     );
@@ -123,59 +180,34 @@ export class ReportsService {
     };
   }
 
-  getAuditTrail(
+  async getAuditTrail(
+    clientId: string,
     from?: string,
     to?: string,
     subjectId?: string,
     limit = 200,
-  ): AuditTrailReport {
-    let events: AuditEvent[] = this.storage.snapshot.auditEvents;
-
-    if (subjectId) events = events.filter((e) => e.subjectId === subjectId);
-    if (from) events = events.filter((e) => e.createdAt >= from);
-    if (to) events = events.filter((e) => e.createdAt <= to);
-
-    const sliced = events.slice(-Math.min(limit, 1000));
+  ): Promise<AuditTrailReport> {
+    const events = await this.audit.listForTrail({
+      clientId,
+      subjectId,
+      from,
+      to,
+      limit,
+    });
 
     return {
       generatedAt: new Date().toISOString(),
-      count: sliced.length,
-      events: sliced,
+      count: events.length,
+      events,
     };
   }
+}
 
-  private countBy<T>(
-    items: T[],
-    keySelector: (item: T) => string,
-  ): ReportBucket {
-    return items.reduce<ReportBucket>((accumulator, item) => {
-      const key = keySelector(item);
-      accumulator[key] = (accumulator[key] ?? 0) + 1;
-      return accumulator;
-    }, {});
-  }
-
-  private sumBy<T>(
-    items: T[],
-    keySelector: (item: T) => string,
-    valueSelector: (item: T) => string,
-  ): AssetVolume {
-    // Accumulate in integer cents to avoid floating-point rounding errors.
-    const totalCents = items.reduce<Record<string, number>>(
-      (accumulator, item) => {
-        const key = keySelector(item);
-        const cents = Math.round(parseFloat(valueSelector(item)) * 100);
-        accumulator[key] = (accumulator[key] ?? 0) + cents;
-        return accumulator;
-      },
-      {},
-    );
-
-    return Object.fromEntries(
-      Object.entries(totalCents).map(([key, cents]) => [
-        key,
-        (cents / 100).toFixed(2),
-      ]),
-    );
-  }
+function toFixedVolumes(volumes: Record<string, number>): AssetVolume {
+  return Object.fromEntries(
+    Object.entries(volumes).map(([asset, volume]) => [
+      asset,
+      volume.toFixed(2),
+    ]),
+  );
 }

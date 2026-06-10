@@ -23,9 +23,14 @@ export function currentTrace(): TraceContext {
   );
 }
 
-export function parseTraceparent(header: string): Pick<TraceContext, 'traceId' | 'spanId'> | null {
+export function parseTraceparent(
+  header: string,
+): Pick<TraceContext, 'traceId' | 'spanId'> | null {
   // W3C traceparent: 00-{traceId}-{parentId}-{flags}
   const parts = header.split('-');
   if (parts.length < 3 || parts[0] !== '00') return null;
-  return { traceId: parts[1] ?? randomBytes(16).toString('hex'), spanId: parts[2] ?? randomBytes(8).toString('hex') };
+  return {
+    traceId: parts[1] ?? randomBytes(16).toString('hex'),
+    spanId: parts[2] ?? randomBytes(8).toString('hex'),
+  };
 }

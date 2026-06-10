@@ -1,6 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { PayInStatus } from '../payins.types';
 
 export class ListPayInsQueryDto {
@@ -22,7 +30,11 @@ export class ListPayInsQueryDto {
   @MaxLength(120)
   externalId?: string;
 
-  @ApiPropertyOptional({ default: 100, maximum: 1000, description: 'Max records to return.' })
+  @ApiPropertyOptional({
+    default: 100,
+    maximum: 1000,
+    description: 'Max records to return.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -30,7 +42,10 @@ export class ListPayInsQueryDto {
   @Max(1000)
   limit?: number = 100;
 
-  @ApiPropertyOptional({ default: 0, description: 'Number of records to skip.' })
+  @ApiPropertyOptional({
+    default: 0,
+    description: 'Number of records to skip.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

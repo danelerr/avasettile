@@ -9,7 +9,9 @@ export class TopUpAndSweepDto {
   })
   @IsOptional()
   @IsString()
-  @Matches(/^\d+(\.\d+)?$/, { message: 'amountAvax must be a positive decimal.' })
+  @Matches(/^\d+(\.\d+)?$/, {
+    message: 'amountAvax must be a positive decimal.',
+  })
   amountAvax?: string;
 
   @ApiPropertyOptional({

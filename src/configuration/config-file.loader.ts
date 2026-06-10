@@ -13,14 +13,11 @@ type ConfigFile = {
   rpcUrl?: string | null;
   explorerBaseUrl?: string | null;
   corsOrigins?: string | string[] | null;
-  storage?: {
-    driver?: 'json' | 'postgres';
-    filePath?: string;
-    database?: {
-      ssl?: boolean;
-      maxConnections?: number;
-      autoMigrate?: boolean;
-    };
+  database?: {
+    ssl?: boolean;
+    sslRejectUnauthorized?: boolean;
+    maxConnections?: number;
+    autoMigrate?: boolean;
   };
   payin?: {
     lookbackBlocks?: number;
@@ -37,30 +34,20 @@ type ConfigFile = {
     minConfirmations?: number;
     waitForReceipt?: boolean;
   };
-  settlement?: {
-    fiatCurrency?: string;
-    fiatRate?: number;
-  };
-  risk?: {
-    reviewAmount?: number;
-    rejectAmount?: number;
-  };
   webhook?: {
-    url?: string | null;
     retryAttempts?: number;
   };
   autoReconcileIntervalSeconds?: number | null;
   autoSweep?: boolean;
   throttleRps?: number;
-  privacy?: {
-    mode?: 'off' | 'metadata-redaction' | 'eerc-experimental';
-    eercContractAddress?: string | null;
-  };
 };
 
 function mapToEnvVars(cfg: ConfigFile): Record<string, string> {
   const v: Record<string, string> = {};
-  const set = (key: string, val: unknown): void => {
+  const set = (
+    key: string,
+    val: string | number | boolean | null | undefined,
+  ): void => {
     if (val != null && val !== '') v[key] = String(val);
   };
 
@@ -75,15 +62,20 @@ function mapToEnvVars(cfg: ConfigFile): Record<string, string> {
       : cfg.corsOrigins;
   }
 
-  set('AVASETTLE_STORAGE_DRIVER', cfg.storage?.driver);
-  set('AVASETTLE_STORAGE_FILE', cfg.storage?.filePath);
-  set('AVASETTLE_DATABASE_SSL', cfg.storage?.database?.ssl);
-  set('AVASETTLE_DATABASE_MAX_CONNECTIONS', cfg.storage?.database?.maxConnections);
-  set('AVASETTLE_DATABASE_AUTO_MIGRATE', cfg.storage?.database?.autoMigrate);
+  set('AVASETTLE_DATABASE_SSL', cfg.database?.ssl);
+  set(
+    'AVASETTLE_DATABASE_SSL_REJECT_UNAUTHORIZED',
+    cfg.database?.sslRejectUnauthorized,
+  );
+  set('AVASETTLE_DATABASE_MAX_CONNECTIONS', cfg.database?.maxConnections);
+  set('AVASETTLE_DATABASE_AUTO_MIGRATE', cfg.database?.autoMigrate);
 
   set('AVASETTLE_PAYIN_LOOKBACK_BLOCKS', cfg.payin?.lookbackBlocks);
   set('AVASETTLE_PAYIN_DERIVATION_ACCOUNT', cfg.payin?.derivationAccount);
-  set('AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES', cfg.payin?.defaultExpirationMinutes);
+  set(
+    'AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES',
+    cfg.payin?.defaultExpirationMinutes,
+  );
   set('AVASETTLE_PAYMENT_ROUTER_ADDRESS', cfg.payin?.paymentRouterAddress);
 
   if (cfg.assets?.enabled != null) {
@@ -99,21 +91,14 @@ function mapToEnvVars(cfg: ConfigFile): Record<string, string> {
   set('AVASETTLE_MIN_CONFIRMATIONS', cfg.blockchain?.minConfirmations);
   set('AVASETTLE_WAIT_FOR_RECEIPT', cfg.blockchain?.waitForReceipt);
 
-  set('AVASETTLE_SETTLEMENT_FIAT_CURRENCY', cfg.settlement?.fiatCurrency);
-  set('AVASETTLE_SETTLEMENT_FIAT_RATE', cfg.settlement?.fiatRate);
-
-  set('AVASETTLE_RISK_REVIEW_AMOUNT', cfg.risk?.reviewAmount);
-  set('AVASETTLE_RISK_REJECT_AMOUNT', cfg.risk?.rejectAmount);
-
-  set('AVASETTLE_WEBHOOK_URL', cfg.webhook?.url);
   set('AVASETTLE_WEBHOOK_RETRY_ATTEMPTS', cfg.webhook?.retryAttempts);
 
-  set('AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS', cfg.autoReconcileIntervalSeconds);
+  set(
+    'AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS',
+    cfg.autoReconcileIntervalSeconds,
+  );
   set('AVASETTLE_AUTO_SWEEP', cfg.autoSweep);
   set('AVASETTLE_THROTTLE_RPS', cfg.throttleRps);
-
-  set('AVASETTLE_PRIVACY_MODE', cfg.privacy?.mode);
-  set('AVASETTLE_EERC_CONTRACT_ADDRESS', cfg.privacy?.eercContractAddress);
 
   return v;
 }

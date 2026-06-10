@@ -1,13 +1,21 @@
-import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CreatePayoutDto } from '../payouts/dto/create-payout.dto';
 import { PayoutsService } from '../payouts/payouts.service';
 import { RequestContext } from '../payouts/payout.types';
-import { RiskService } from '../risk/risk.service';
 import { ChainFlowService } from './chain-flow.service';
+
+const context: RequestContext = {
+  clientId: 'client-1',
+  clientName: 'Chain Flow',
+  correlationId: null,
+  idempotencyKey: null,
+  actor: 'chain-flow',
+  sourceIp: null,
+};
 
 const payout = {
   id: 'payout-id',
+  clientId: 'client-1',
   externalId: 'cf-retiro-1',
   chainFlowRequestId: 'cf-retiro-1',
   status: 'prepared',
@@ -40,9 +48,6 @@ describe('ChainFlowService', () => {
     getPayoutByExternalId: jest.fn(),
     listPayouts: jest.fn(),
   };
-  const risk = {
-    assess: jest.fn(),
-  };
 
   beforeEach(async () => {
     jest.resetAllMocks();
@@ -50,12 +55,10 @@ describe('ChainFlowService', () => {
       providers: [
         ChainFlowService,
         { provide: PayoutsService, useValue: payouts },
-        { provide: RiskService, useValue: risk },
       ],
     }).compile();
 
     service = module.get(ChainFlowService);
-    risk.assess.mockReturnValue({ decision: 'approve' });
     payouts.createPayout.mockResolvedValue(payout);
     payouts.authorizePayout.mockResolvedValue({
       ...payout,
@@ -63,25 +66,19 @@ describe('ChainFlowService', () => {
       transactionHash:
         '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
-    payouts.getPayoutByExternalId.mockReturnValue(payout);
-    payouts.listPayouts.mockReturnValue([payout]);
+    payouts.getPayoutByExternalId.mockResolvedValue(payout);
+    payouts.listPayouts.mockResolvedValue([payout]);
   });
 
-  it('maps preparar retiro aliases to a payout request', async () => {
+  it('maps AvaSettle fallback fields to a payout request', async () => {
     const response = await service.prepararRetiro(
       {
-        idRetiro: 'cf-retiro-1',
-        monto: '10',
-        moneda: 'USDC',
-        wallet: '0x1111111111111111111111111111111111111111',
+        externalId: 'cf-retiro-1',
+        amount: '10',
+        asset: 'USDC',
+        beneficiaryAddress: '0x1111111111111111111111111111111111111111',
       },
-      {
-        institutionId: 'chain-flow',
-        correlationId: null,
-        idempotencyKey: null,
-        actor: 'chain-flow',
-        sourceIp: null,
-      },
+      context,
     );
 
     expect(payouts.createPayout).toHaveBeenCalledWith(
@@ -132,13 +129,7 @@ describe('ChainFlowService', () => {
         tnTransferenciaBloque: 9001,
         tnProcesadorPagos: 3,
       },
-      {
-        institutionId: 'chain-flow',
-        correlationId: 'EXT-0001',
-        idempotencyKey: 'EXT-0001',
-        actor: 'chain-flow',
-        sourceIp: null,
-      },
+      { ...context, correlationId: 'EXT-0001', idempotencyKey: 'EXT-0001' },
     );
 
     const [[createdDto]] = payouts.createPayout.mock.calls as [
@@ -174,7 +165,7 @@ describe('ChainFlowService', () => {
     });
   });
 
-  it('can resolve status by Chain Flow retiro payment id metadata', () => {
+  it('can resolve status by Chain Flow retiro payment id metadata', async () => {
     const metadataPayout = {
       ...payout,
       externalId: 'EXT-0001',
@@ -185,10 +176,13 @@ describe('ChainFlowService', () => {
         },
       },
     };
-    payouts.getPayoutByExternalId.mockReturnValueOnce(null);
-    payouts.listPayouts.mockReturnValueOnce([metadataPayout]);
+    payouts.getPayoutByExternalId.mockResolvedValueOnce(null);
+    payouts.listPayouts.mockResolvedValueOnce([metadataPayout]);
 
-    const response = service.consultarEstadoRetiro({ tnRetiroPago: 12345 });
+    const response = await service.consultarEstadoRetiro(
+      { tnRetiroPago: 12345 },
+      context,
+    );
 
     expect(response).toMatchObject({
       codigo: '00',
@@ -196,27 +190,5 @@ describe('ChainFlowService', () => {
       tnRetiroPago: 12345,
       estado: 'prepared',
     });
-  });
-
-  it('rejects preparar retiro when risk rejects', async () => {
-    risk.assess.mockReturnValue({ decision: 'reject' });
-
-    await expect(
-      service.prepararRetiro(
-        {
-          idRetiro: 'cf-retiro-1',
-          monto: '100000',
-          moneda: 'USDC',
-          wallet: '0x1111111111111111111111111111111111111111',
-        },
-        {
-          institutionId: 'chain-flow',
-          correlationId: null,
-          idempotencyKey: null,
-          actor: 'chain-flow',
-          sourceIp: null,
-        },
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

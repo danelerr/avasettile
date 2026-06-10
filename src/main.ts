@@ -19,14 +19,13 @@ async function bootstrap() {
 
   app.enableCors({
     origin: configuration.corsOrigins,
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
       'authorization',
       'content-type',
       'idempotency-key',
       'x-avasettle-api-key',
       'x-correlation-id',
-      'x-institution-id',
       'x-request-id',
       'traceparent',
       'tracestate',
@@ -46,11 +45,15 @@ async function bootstrap() {
   const openApiConfig = new DocumentBuilder()
     .setTitle('AvaSettle On-chain Provider API')
     .setDescription(
-      'B2B API for Chain Flow and institutional orchestrators to prepare, authorize, broadcast, and reconcile Avalanche stablecoin payouts.',
+      'Multi-tenant B2B API for institutions to prepare, authorize, broadcast, and reconcile Avalanche stablecoin pay-ins and payouts.',
     )
     .setVersion(configuration.version)
     .addServer(`http://localhost:${configuration.port}`, 'Local development')
     .addTag('health', 'Service metadata, liveness, and readiness checks.')
+    .addTag(
+      'clients',
+      'Platform-operator endpoints to register clients and issue API keys.',
+    )
     .addTag(
       'treasury',
       'Treasury configuration, balances, and settlement controls.',
@@ -68,21 +71,24 @@ async function bootstrap() {
       'Real EVM deposit address generation and pay-in reconciliation.',
     )
     .addTag('reconciliation', 'Semi-automatic on-chain reconciliation jobs.')
-    .addTag('reports', 'Institutional operational reporting.')
-    .addTag('settlement', 'Simulated fiat settlement records.')
-    .addTag('risk', 'Mock risk scoring integration seam for Wavy Node.')
-    .addTag(
-      'privacy',
-      'Experimental private settlement receipts and eERC integration placeholders.',
+    .addTag('reports', 'Operational reporting per client.')
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'x-avasettle-api-key',
+        in: 'header',
+        description: 'Per-client API key issued via POST /v1/admin/clients.',
+      },
+      'avasettle-api-key',
     )
     .addApiKey(
       {
         type: 'apiKey',
         name: 'x-avasettle-api-key',
         in: 'header',
-        description: 'Shared B2B API key issued to Chain Flow.',
+        description: 'Platform-operator admin key (AVASETTLE_ADMIN_API_KEY).',
       },
-      'avasettle-api-key',
+      'avasettle-admin-key',
     )
     .addBearerAuth(
       {

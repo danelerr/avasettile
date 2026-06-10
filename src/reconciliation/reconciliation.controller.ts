@@ -1,27 +1,27 @@
-import { Controller, Headers, Ip, Post, UseGuards } from '@nestjs/common';
+import { Controller, Post, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiOkResponse,
   ApiOperation,
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
+import { AdminApiKeyGuard } from '../auth/admin-api-key.guard';
 import { RequestContext } from '../payouts/payout.types';
 import { ReconciliationService } from './reconciliation.service';
 
 @ApiTags('reconciliation')
-@ApiSecurity('avasettle-api-key')
-@ApiSecurity('chain-flow-bearer')
+@ApiSecurity('avasettle-admin-key')
 @Controller('v1/reconciliation')
-@UseGuards(ApiKeyGuard)
+@UseGuards(AdminApiKeyGuard)
 export class ReconciliationController {
   constructor(private readonly reconciliation: ReconciliationService) {}
 
   @Post('run')
   @ApiOperation({
-    summary: 'Run semi-automatic reconciliation',
+    summary: 'Run semi-automatic reconciliation (admin)',
     description:
-      'Attempts to reconcile broadcasted payouts and open pay-ins against Avalanche on-chain state.',
+      'Attempts to reconcile broadcasted payouts and open pay-ins of every client against Avalanche on-chain state. Platform-operator endpoint.',
   })
   @ApiOkResponse({
     schema: {
@@ -36,23 +36,18 @@ export class ReconciliationController {
       },
     },
   })
-  run(
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
-  ) {
-    return this.reconciliation.run(this.toRequestContext(headers, sourceIp));
+  run(@Req() request: Request) {
+    return this.reconciliation.run(this.toRequestContext(request));
   }
 
-  private toRequestContext(
-    headers: Record<string, string | string[] | undefined>,
-    sourceIp: string,
-  ): RequestContext {
+  private toRequestContext(request: Request): RequestContext {
     return {
-      institutionId: this.firstHeader(headers['x-institution-id']),
-      correlationId: this.firstHeader(headers['x-correlation-id']),
-      idempotencyKey: this.firstHeader(headers['idempotency-key']),
-      actor: this.firstHeader(headers.authorization) ? 'chain-flow' : null,
-      sourceIp,
+      clientId: null,
+      clientName: null,
+      correlationId: this.firstHeader(request.headers['x-correlation-id']),
+      idempotencyKey: null,
+      actor: 'admin',
+      sourceIp: request.ip ?? null,
     };
   }
 

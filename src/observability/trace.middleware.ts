@@ -14,7 +14,9 @@ import { parseTraceparent, traceStore } from './trace-context';
 @Injectable()
 export class TraceMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
-    const incomingRequestId = (req.headers['x-request-id'] as string | undefined)?.trim();
+    const incomingRequestId = (
+      req.headers['x-request-id'] as string | undefined
+    )?.trim();
     const requestID = incomingRequestId || randomUUID();
     const requestIDInternal = randomUUID();
 

@@ -2,11 +2,10 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
-  Ip,
   Param,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -22,7 +21,8 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
+import { ClientApiKeyGuard } from '../auth/client-api-key.guard';
+import type { AuthenticatedRequest } from '../auth/client-api-key.guard';
 import { extractRequestContext } from '../common/request-context.util';
 import { AuthorizePayoutDto } from './dto/authorize-payout.dto';
 import { CreatePayoutDto } from './dto/create-payout.dto';
@@ -68,7 +68,7 @@ const payoutExample = {
   description: 'Missing or invalid AvaSettle API key.',
 })
 @Controller('v1/payouts')
-@UseGuards(ApiKeyGuard)
+@UseGuards(ClientApiKeyGuard)
 export class PayoutsController {
   constructor(private readonly payouts: PayoutsService) {}
 
@@ -90,17 +90,16 @@ export class PayoutsController {
   })
   createPayout(
     @Body() dto: CreatePayoutDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.payouts.createPayout(dto, extractRequestContext(headers, sourceIp));
+    return this.payouts.createPayout(dto, extractRequestContext(request));
   }
 
   @Get()
   @ApiOperation({
     summary: 'List payouts',
     description:
-      'Returns the payout ledger records. Filter by lifecycle status or externalId.',
+      'Returns the payout ledger records of the calling client. Filter by lifecycle status or externalId.',
   })
   @ApiQuery({
     name: 'status',
@@ -116,8 +115,11 @@ export class PayoutsController {
     description: 'Filtered payout list ordered by most recent creation time.',
     schema: { example: [payoutExample] },
   })
-  listPayouts(@Query() query: ListPayoutsQueryDto) {
-    return this.payouts.listPayouts(query);
+  listPayouts(
+    @Query() query: ListPayoutsQueryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.payouts.listPayouts(query, extractRequestContext(request));
   }
 
   @Get(':id')
@@ -127,8 +129,8 @@ export class PayoutsController {
     description: 'Payout detail.',
     schema: { example: payoutExample },
   })
-  getPayout(@Param('id') id: string) {
-    return this.payouts.getPayout(id);
+  getPayout(@Param('id') id: string, @Req() request: AuthenticatedRequest) {
+    return this.payouts.getPayout(id, extractRequestContext(request));
   }
 
   @Post(':id/authorize')
@@ -158,13 +160,12 @@ export class PayoutsController {
   authorizePayout(
     @Param('id') id: string,
     @Body() dto: AuthorizePayoutDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
     return this.payouts.authorizePayout(
       id,
       dto,
-      extractRequestContext(headers, sourceIp),
+      extractRequestContext(request),
     );
   }
 
@@ -187,16 +188,13 @@ export class PayoutsController {
     },
   })
   @ApiConflictResponse({
-    description: 'Payout has not been broadcasted yet and has no transaction hash.',
+    description:
+      'Payout has not been broadcasted yet and has no transaction hash.',
   })
   reconcilePayout(
     @Param('id') id: string,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.payouts.reconcilePayout(
-      id,
-      extractRequestContext(headers, sourceIp),
-    );
+    return this.payouts.reconcilePayout(id, extractRequestContext(request));
   }
 }

@@ -6,6 +6,7 @@ export type AssetVolume = Record<string, string>;
 
 export type SweepQueueItem = {
   id: string;
+  clientId: string | null;
   externalId: string;
   depositAddress: string;
   asset: string;
@@ -61,15 +62,5 @@ export type InstitutionalSummaryReport = {
     expectedVolumeByAsset: AssetVolume;
     receivedVolumeByAsset: AssetVolume;
     sweptVolumeByAsset: AssetVolume;
-  };
-  settlements: {
-    count: number;
-    byStatus: ReportBucket;
-    fiatVolumeByCurrency: AssetVolume;
-  };
-  privateSettlements: {
-    count: number;
-    byStatus: ReportBucket;
-    byMode: ReportBucket;
   };
 };

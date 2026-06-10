@@ -1,6 +1,6 @@
 # AvaSettle
 
-B2B stablecoin payments infrastructure for PSPs, fintechs, and remittance companies in LATAM. Accepts and reconciles USDC/USDT pay-ins on Avalanche, sweeps funds into institutional treasury, and executes outbound ERC-20 payouts.
+Multi-tenant B2B stablecoin payments infrastructure for PSPs, fintechs, and remittance companies in LATAM. Accepts and reconciles USDC/USDT pay-ins on Avalanche, sweeps funds into institutional treasury, and executes outbound ERC-20 payouts.
 
 **Top 5 — Avalanche LATAM Institutional Hackathon · $300 prize**
 
@@ -11,38 +11,39 @@ B2B stablecoin payments infrastructure for PSPs, fintechs, and remittance compan
 | Area | State |
 |---|---|
 | Pay-in / payout lifecycle | Ready |
-| PostgreSQL normalized storage | Ready |
+| Multi-tenant clients (per-client API keys, data scoping, webhooks) | Ready |
+| PostgreSQL persistence (direct, no in-memory state) | Ready |
 | Structured observability (W3C trace, HMAC webhooks) | Ready |
 | Pagination on list endpoints | Ready |
-| Webhook delivery log | Ready (PostgreSQL only) |
+| Webhook delivery log | Ready |
 | Auto-sweep after confirmation | Ready (opt-in via `autoSweep`) |
+| CI (typecheck, lint, tests, build, migration check) | Ready |
 | PaymentRouter smart contract | Scripts ready — not deployed yet |
-| Treasury key management | Hot wallet — **not production-safe** |
-| Rate limiting | In-memory — **does not scale multi-instance** |
-| Fiat settlement | Simulated — no real fiat rail |
-| Risk scoring | Mock thresholds — no real model |
-| eERC private settlement | Experimental API only — no on-chain submission |
+| Treasury key management | Hot wallet — **not production-safe for high value** |
+| Rate limiting | In-memory per instance — move to Redis for multi-instance |
 
-**Short answer:** Ready for institutional pilots on Fuji (testnet) or production Avalanche with a hot wallet accepted. Not ready for high-value mainnet unless treasury is moved to KMS/HSM and rate limiting to Redis.
+**Short answer:** Ready for institutional pilots on Fuji (testnet) or production Avalanche with a hot wallet accepted. For high-value mainnet move the treasury key to KMS/HSM and rate limiting to Redis.
 
 ---
 
 ## Architecture
 
 ```
-Client / Chain Flow
+Clients (per-tenant API keys)          Platform operator (admin key)
+        │                                       │
+        ▼                                       ▼
+  [AvaSettle API]  ───────────────  /v1/admin/clients
         │
-        ▼
-  [AvaSettle API]  ──── PostgreSQL (normalized tables)
-        │
-        ├── PayinsService  ──── viem (getLogs, ERC-20)
-        ├── PayoutsService ──── viem (sendTransaction)
-        ├── ReconciliationService (setInterval or manual)
-        ├── WebhookService (HMAC-SHA256, retry backoff)
-        └── BlockchainService ── Avalanche C-Chain RPC
+        ├── ClientsService   ──── PostgreSQL (avasettle_clients)
+        ├── PayinsService    ──── viem (getLogs, ERC-20)
+        ├── PayoutsService   ──── viem (sendTransaction)
+        ├── ReconciliationService (setInterval or manual, admin)
+        ├── WebhookService   ──── per-client URL + HMAC secret
+        └── BlockchainService ─── Avalanche C-Chain RPC
 ```
 
-- **Storage:** JSON file (dev) or PostgreSQL via `pg` (prod). No ORM.
+- **Tenancy:** every client (institution) is registered via the admin API and gets its own API key (only the SHA-256 hash is stored). All pay-ins, payouts, audit events, and webhook deliveries are scoped by `client_id`.
+- **Storage:** PostgreSQL via `pg`, no ORM, no in-memory state. The HD derivation counter is claimed atomically in SQL, so multiple instances never derive the same address.
 - **Key derivation:** BIP-44 HD wallet from `AVASETTLE_PAYIN_MNEMONIC`. Each pay-in gets a unique EVM address.
 - **Sweep:** Treasury hot wallet top-ups derived addresses with AVAX, then sweeps ERC-20 to treasury.
 - **Smart contract:** Optional `PaymentRouter.sol` (Foundry) — payer approves USDC, calls `payInvoice`, funds go directly to treasury without per-address sweep.
@@ -54,12 +55,23 @@ Client / Chain Flow
 ```bash
 cd avasettle
 pnpm install
-cp .env.example .env   # fill in secrets
+cp .env.example .env   # fill in secrets (DATABASE_URL is required)
 pnpm start:dev
 ```
 
-API available at `http://localhost:3001`.  
+API available at `http://localhost:3001`.
 Swagger UI at `http://localhost:3001/docs`.
+
+### Register your first client
+
+```bash
+curl -X POST http://localhost:3001/v1/admin/clients \
+  -H "x-avasettle-api-key: $AVASETTLE_ADMIN_API_KEY" \
+  -H "content-type: application/json" \
+  -d '{"name": "Fintech LATAM SA", "webhookUrl": "https://example.com/webhooks", "webhookSecret": "hook-secret"}'
+```
+
+The response contains the client `apiKey` **once** — store it securely. The client then calls every `/v1/*` business endpoint with `x-avasettle-api-key: <client key>`.
 
 ---
 
@@ -71,11 +83,12 @@ Secrets go in `.env`. Everything else goes in `config/avasettle.json` (see `conf
 
 | Variable | Required | Description |
 |---|---|---|
-| `AVASETTLE_API_KEY` | Yes | Shared B2B secret. Generate with `openssl rand -hex 32`. |
+| `AVASETTLE_ADMIN_API_KEY` | Yes | Platform-operator key for client management. Generate with `openssl rand -hex 32`. |
+| `DATABASE_URL` | Yes | `postgresql://user:pass@host:5432/avasettle` |
 | `AVASETTLE_TREASURY_PRIVATE_KEY` | Yes | Hot wallet private key for payouts and sweep top-ups. |
 | `AVASETTLE_PAYIN_MNEMONIC` | Yes | BIP-39 mnemonic for deriving pay-in deposit addresses. |
-| `AVASETTLE_DATABASE_URL` | Postgres only | `postgresql://user:pass@host:5432/avasettle` |
-| `AVASETTLE_WEBHOOK_SECRET` | Recommended | HMAC-SHA256 key for `x-avasettle-signature` header. |
+
+Webhook URLs and signing secrets are configured **per client** via the admin API, not via env vars.
 
 ### Operational config (`config/avasettle.json`)
 
@@ -84,10 +97,7 @@ Secrets go in `.env`. Everything else goes in `config/avasettle.json` (see `conf
   "network": "avalanche-fuji",
   "port": 3001,
   "rpcUrl": "https://api.avax-test.network/ext/bc/C/rpc",
-  "storage": {
-    "driver": "postgres",
-    "database": { "ssl": false, "maxConnections": 5, "autoMigrate": true }
-  },
+  "database": { "ssl": false, "maxConnections": 5, "autoMigrate": true },
   "payin": {
     "lookbackBlocks": 50000,
     "defaultExpirationMinutes": 30
@@ -97,8 +107,7 @@ Secrets go in `.env`. Everything else goes in `config/avasettle.json` (see `conf
     "USDC": { "address": "0x5425890298aed601595a70AB815c96711a31Bc65", "decimals": 6, "maxPayoutAmount": "1000" }
   },
   "blockchain": { "minConfirmations": 2, "waitForReceipt": false },
-  "settlement": { "fiatCurrency": "USD", "fiatRate": 1 },
-  "webhook": { "url": "https://your-endpoint.com/webhook", "retryAttempts": 3 },
+  "webhook": { "retryAttempts": 3 },
   "autoReconcileIntervalSeconds": 30,
   "autoSweep": false
 }
@@ -133,12 +142,26 @@ AVASETTLE_DATABASE_URL=postgresql://... pnpm db:migrate
 
 | Migration | Purpose |
 |---|---|
-| `001_init_avasettle.sql` | Full normalized schema |
+| `000_prerequisites.sql` | pgcrypto + `set_updated_at()` trigger function |
+| `001_init_avasettle.sql` | No-op (legacy hackathon schema, dropped in 007) |
 | `002_runtime_state.sql` | No-op (legacy) |
-| `003_normalized_tables.sql` | Pay-ins, payouts, audit events, settlements, idempotency |
-| `004_settlement_extended.sql` | Settlement columns + private settlements table |
+| `003_normalized_tables.sql` | Pay-ins, payouts, audit events, counters, idempotency |
+| `004_settlement_extended.sql` | Legacy settlement columns (dropped in 007) |
 | `005_drop_runtime_state.sql` | Drops legacy blob table |
 | `006_webhook_deliveries.sql` | Webhook delivery log |
+| `007_clients_multi_tenant.sql` | Clients table, `client_id` scoping, drops unused/mock tables |
+
+---
+
+## Authentication model
+
+| Audience | Header | Source |
+|---|---|---|
+| Platform operator | `x-avasettle-api-key: <admin key>` | `AVASETTLE_ADMIN_API_KEY` env var |
+| Client (institution) | `x-avasettle-api-key: <client key>` or `Authorization: Bearer <client key>` | Issued by `POST /v1/admin/clients`, rotatable via `POST /v1/admin/clients/:id/rotate-key` |
+
+Admin endpoints: `/v1/admin/clients*`, `/v1/reconciliation/run`, `/v1/reports/sweep-queue`.
+Everything else under `/v1/*` and `/api/*` requires a client key and only sees that client's data.
 
 ---
 
@@ -171,7 +194,7 @@ Contract features:
 
 ## Webhooks
 
-AvaSettle fires webhooks to `AVASETTLE_WEBHOOK_URL` for lifecycle events. All payloads are signed with `x-avasettle-signature: sha256=<hmac-hex>`.
+AvaSettle fires webhooks to each client's configured `webhookUrl` for lifecycle events. Payloads are signed with the client's `webhookSecret`: `x-avasettle-signature: sha256=<hmac-hex>`.
 
 Verify in your receiver:
 ```javascript
@@ -185,7 +208,7 @@ const valid = sig === req.headers['x-avasettle-signature'].slice(7);
 | `payin.confirmed` | Pay-in reaches required confirmations (or manually accepted) |
 | `payout.confirmed` | Payout transaction confirmed on-chain |
 
-Failed deliveries are retried with backoff (1s → 5s → 30s). All delivery attempts logged to `avasettle_webhook_deliveries`.
+Failed deliveries are retried with backoff (1s → 5s → 30s). All delivery attempts are logged to `avasettle_webhook_deliveries` and queryable via `GET /v1/reports/webhook-deliveries`.
 
 ---
 
@@ -199,11 +222,10 @@ Set `autoSweep: true` in config (or `AVASETTLE_AUTO_SWEEP=true`) to automaticall
 
 ```bash
 # Store secrets
-printf '%s' "$AVASETTLE_API_KEY"              | gcloud secrets create avasettle-api-key --data-file=-
-printf '%s' "$AVASETTLE_TREASURY_PRIVATE_KEY" | gcloud secrets create avasettle-treasury-private-key --data-file=-
-printf '%s' "$AVASETTLE_PAYIN_MNEMONIC"       | gcloud secrets create avasettle-payin-mnemonic --data-file=-
-printf '%s' "$AVASETTLE_DATABASE_URL"         | gcloud secrets create avasettle-database-url --data-file=-
-printf '%s' "$AVASETTLE_WEBHOOK_SECRET"       | gcloud secrets create avasettle-webhook-secret --data-file=-
+printf '%s' "$AVASETTLE_ADMIN_API_KEY"         | gcloud secrets create avasettle-admin-api-key --data-file=-
+printf '%s' "$AVASETTLE_TREASURY_PRIVATE_KEY"  | gcloud secrets create avasettle-treasury-private-key --data-file=-
+printf '%s' "$AVASETTLE_PAYIN_MNEMONIC"        | gcloud secrets create avasettle-payin-mnemonic --data-file=-
+printf '%s' "$AVASETTLE_DATABASE_URL"          | gcloud secrets create avasettle-database-url --data-file=-
 
 # Deploy
 gcloud run deploy avasettle \
@@ -212,11 +234,10 @@ gcloud run deploy avasettle \
   --allow-unauthenticated \
   --min-instances 1 \
   --set-secrets \
-    AVASETTLE_API_KEY=avasettle-api-key:latest,\
+    AVASETTLE_ADMIN_API_KEY=avasettle-admin-api-key:latest,\
     AVASETTLE_TREASURY_PRIVATE_KEY=avasettle-treasury-private-key:latest,\
     AVASETTLE_PAYIN_MNEMONIC=avasettle-payin-mnemonic:latest,\
-    AVASETTLE_DATABASE_URL=avasettle-database-url:latest,\
-    AVASETTLE_WEBHOOK_SECRET=avasettle-webhook-secret:latest
+    AVASETTLE_DATABASE_URL=avasettle-database-url:latest
 ```
 
 Cloud Run injects `PORT` automatically. Do not hardcode it.
@@ -237,8 +258,8 @@ Swagger UI (when server is running): `http://localhost:3001/docs`
 - `AVASETTLE_PAYIN_MNEMONIC` controls real EVM addresses. Treat it like a production private key.
 - Set explicit token contract addresses per network — never rely on defaults.
 - Use `pnpm db:migrate` for production migrations, not `autoMigrate`.
-- Rotate `AVASETTLE_API_KEY` before sharing with new integration partners.
-- `GET /health/readiness` tells you if treasury key, mnemonic, and token addresses are configured.
+- Rotate client keys with `POST /v1/admin/clients/:id/rotate-key`; disable a client with `PATCH /v1/admin/clients/:id {"status": "disabled"}`.
+- `GET /health/readiness` reports database reachability, treasury key, mnemonic, token addresses, RPC, and registered client count.
 
 ---
 

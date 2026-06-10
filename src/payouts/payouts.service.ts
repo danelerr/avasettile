@@ -38,17 +38,6 @@ export class PayoutsService {
     dto: CreatePayoutDto,
     context: RequestContext,
   ): Promise<PayoutResponse> {
-    const existing = this.ledger.findByExternalId(dto.externalId);
-    if (existing) {
-      this.audit.record({
-        type: 'PAYOUT_IDEMPOTENT_REPLAY',
-        subjectId: existing.id,
-        actor: this.toAuditActor(context),
-        payload: { externalId: dto.externalId },
-      });
-      return this.toResponse(existing, true);
-    }
-
     const assetConfig = this.configuration.getAssetConfig(dto.asset);
     const amountAtomic = this.parseAmount(dto.amount, assetConfig);
 
@@ -65,8 +54,9 @@ export class PayoutsService {
     }
 
     const now = new Date().toISOString();
-    const record = this.ledger.create({
+    const { record, existed } = await this.ledger.createOrGetExisting({
       id: randomUUID(),
+      clientId: context.clientId,
       externalId: dto.externalId,
       chainFlowRequestId: dto.chainFlowRequestId ?? null,
       status: PayoutStatus.Prepared,
@@ -90,7 +80,17 @@ export class PayoutsService {
       confirmedAt: null,
     });
 
-    this.audit.record({
+    if (existed) {
+      await this.audit.record({
+        type: 'PAYOUT_IDEMPOTENT_REPLAY',
+        subjectId: record.id,
+        actor: this.toAuditActor(context),
+        payload: { externalId: dto.externalId },
+      });
+      return this.toResponse(record, true);
+    }
+
+    await this.audit.record({
       type: 'PAYOUT_PREPARED',
       subjectId: record.id,
       actor: this.toAuditActor(context),
@@ -109,17 +109,33 @@ export class PayoutsService {
     return this.toResponse(record);
   }
 
-  listPayouts(query: ListPayoutsQueryDto): PayoutResponse[] {
-    return this.ledger.list(query).map((record) => this.toResponse(record));
+  async listPayouts(
+    query: ListPayoutsQueryDto,
+    context: RequestContext,
+  ): Promise<PayoutResponse[]> {
+    const records = await this.ledger.list({
+      ...query,
+      clientId: context.clientId ?? undefined,
+    });
+    return Promise.all(records.map((record) => this.toResponse(record)));
   }
 
-  getPayout(id: string): PayoutResponse {
-    const payout = this.requirePayout(id);
+  async getPayout(
+    id: string,
+    context: RequestContext,
+  ): Promise<PayoutResponse> {
+    const payout = await this.requirePayout(id, context);
     return this.toResponse(payout);
   }
 
-  getPayoutByExternalId(externalId: string): PayoutResponse {
-    const payout = this.ledger.findByExternalId(externalId);
+  async getPayoutByExternalId(
+    externalId: string,
+    context: RequestContext,
+  ): Promise<PayoutResponse> {
+    const payout = await this.ledger.findByExternalId(
+      context.clientId,
+      externalId,
+    );
     if (!payout) throw new NotFoundException('Payout not found.');
     return this.toResponse(payout);
   }
@@ -129,7 +145,7 @@ export class PayoutsService {
     dto: AuthorizePayoutDto,
     context: RequestContext,
   ): Promise<PayoutResponse> {
-    const payout = this.requirePayout(id);
+    const payout = await this.requirePayout(id, context);
     if (
       payout.status === PayoutStatus.Broadcasted ||
       payout.status === PayoutStatus.Confirmed
@@ -144,12 +160,12 @@ export class PayoutsService {
     }
 
     const now = new Date().toISOString();
-    const authorized = this.ledger.update(id, {
+    const authorized = (await this.ledger.update(id, {
       status: PayoutStatus.Authorized,
       authorizedAt: now,
-    })!;
+    }))!;
 
-    this.audit.record({
+    await this.audit.record({
       type: 'PAYOUT_AUTHORIZED',
       subjectId: id,
       actor: this.toAuditActor(context, dto.approvedBy),
@@ -180,15 +196,15 @@ export class PayoutsService {
         transfer.status === 'confirmed'
           ? PayoutStatus.Confirmed
           : PayoutStatus.Broadcasted;
-      const updated = this.ledger.update(id, {
+      const updated = (await this.ledger.update(id, {
         status,
         transactionHash: transfer.hash,
         broadcastedAt: now,
         confirmedAt: status === PayoutStatus.Confirmed ? now : null,
         failureReason: null,
-      })!;
+      }))!;
 
-      this.audit.record({
+      await this.audit.record({
         type:
           status === PayoutStatus.Confirmed
             ? 'PAYOUT_CONFIRMED'
@@ -199,7 +215,7 @@ export class PayoutsService {
       });
 
       if (status === PayoutStatus.Confirmed) {
-        void this.webhook.fire('payout.confirmed', {
+        void this.webhook.fire(updated.clientId, 'payout.confirmed', {
           id: updated.id,
           externalId: updated.externalId,
           asset: updated.asset,
@@ -213,7 +229,7 @@ export class PayoutsService {
       return this.toResponse(updated);
     } catch (error) {
       if (error instanceof ConflictException) {
-        this.ledger.update(id, {
+        await this.ledger.update(id, {
           status: PayoutStatus.Prepared,
           failureReason: error.message,
         });
@@ -222,12 +238,12 @@ export class PayoutsService {
 
       const failureReason =
         error instanceof Error ? error.message : 'Unknown broadcast failure.';
-      const failed = this.ledger.update(id, {
+      const failed = (await this.ledger.update(id, {
         status: PayoutStatus.Failed,
         failureReason,
-      })!;
+      }))!;
 
-      this.audit.record({
+      await this.audit.record({
         type: 'PAYOUT_FAILED',
         subjectId: id,
         actor: this.toAuditActor(context, dto.approvedBy),
@@ -236,7 +252,7 @@ export class PayoutsService {
 
       throw new BadGatewayException({
         message: 'Failed to broadcast payout on Avalanche.',
-        payout: this.toResponse(failed),
+        payout: await this.toResponse(failed),
       });
     }
   }
@@ -245,7 +261,7 @@ export class PayoutsService {
     id: string,
     context: RequestContext,
   ): Promise<PayoutResponse> {
-    const payout = this.requirePayout(id);
+    const payout = await this.requirePayout(id, context);
     if (!payout.transactionHash) {
       throw new ConflictException(
         'Payout has no transaction hash to reconcile.',
@@ -270,13 +286,13 @@ export class PayoutsService {
       failureReason = null;
     }
 
-    const updated = this.ledger.update(id, {
+    const updated = (await this.ledger.update(id, {
       status,
       confirmedAt,
       failureReason,
-    })!;
+    }))!;
 
-    this.audit.record({
+    await this.audit.record({
       type: 'PAYOUT_RECONCILED',
       subjectId: id,
       actor: this.toAuditActor(context),
@@ -286,8 +302,14 @@ export class PayoutsService {
     return this.toResponse(updated);
   }
 
-  private requirePayout(id: string): PayoutRecord {
-    const payout = this.ledger.findById(id);
+  private async requirePayout(
+    id: string,
+    context: RequestContext,
+  ): Promise<PayoutRecord> {
+    const payout = await this.ledger.findById(
+      id,
+      context.clientId ?? undefined,
+    );
     if (!payout) throw new NotFoundException('Payout not found.');
     return payout;
   }
@@ -302,14 +324,15 @@ export class PayoutsService {
     }
   }
 
-  private toResponse(
+  private async toResponse(
     record: PayoutRecord,
     idempotentReplay = false,
-  ): PayoutResponse {
+  ): Promise<PayoutResponse> {
+    const trail = await this.audit.listBySubject(record.id);
     return {
       ...record,
       idempotentReplay: idempotentReplay || undefined,
-      auditTrail: this.audit.listBySubject(record.id).map((event) => ({
+      auditTrail: trail.map((event) => ({
         type: event.type,
         createdAt: event.createdAt,
         correlationId: event.actor.correlationId,
@@ -322,7 +345,7 @@ export class PayoutsService {
     overrideActor?: string,
   ): AuditActor {
     return {
-      institutionId: context.institutionId,
+      clientId: context.clientId,
       actor: overrideActor ?? context.actor,
       correlationId: context.correlationId,
       sourceIp: context.sourceIp,

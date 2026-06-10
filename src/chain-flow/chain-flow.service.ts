@@ -3,7 +3,6 @@ import { AuthorizePayoutDto } from '../payouts/dto/authorize-payout.dto';
 import { CreatePayoutDto } from '../payouts/dto/create-payout.dto';
 import { PayoutsService } from '../payouts/payouts.service';
 import { PayoutResponse, RequestContext } from '../payouts/payout.types';
-import { RiskService } from '../risk/risk.service';
 import { SettlementAsset } from '../configuration/configuration.types';
 import {
   ChainFlowEstadoRetiroDto,
@@ -12,41 +11,19 @@ import {
 
 @Injectable()
 export class ChainFlowService {
-  constructor(
-    private readonly payouts: PayoutsService,
-    private readonly risk: RiskService,
-  ) {}
+  constructor(private readonly payouts: PayoutsService) {}
 
   async prepararRetiro(dto: ChainFlowRetiroDto, context: RequestContext) {
     const createDto = this.toCreatePayoutDto(dto);
-    const risk = this.risk.assess(
-      {
-        subjectType: 'payout',
-        subjectId: createDto.externalId,
-        amount: createDto.amount,
-        asset: createDto.asset,
-        address: createDto.beneficiaryAddress,
-        metadata: createDto.metadata,
-      },
-      context,
-    );
-    if (risk.decision === 'reject') {
-      throw new BadRequestException({
-        codigo: 'RISK_REJECTED',
-        mensaje: 'Retiro rechazado por controles de riesgo.',
-        risk,
-      });
-    }
-
     const payout = await this.payouts.createPayout(createDto, context);
-    return this.toChainFlowResponse(payout, 'Retiro preparado.', risk);
+    return this.toChainFlowResponse(payout, 'Retiro preparado.');
   }
 
   async autorizarRetiro(
     dto: ChainFlowEstadoRetiroDto,
     context: RequestContext,
   ) {
-    const payout = this.resolvePayout(dto);
+    const payout = await this.resolvePayout(dto, context);
     const authorized = await this.payouts.authorizePayout(
       payout.id,
       {
@@ -58,13 +35,19 @@ export class ChainFlowService {
     return this.toChainFlowResponse(authorized, 'Retiro autorizado.');
   }
 
-  consultarEstadoRetiro(dto: ChainFlowEstadoRetiroDto) {
-    const payout = this.resolvePayout(dto);
+  async consultarEstadoRetiro(
+    dto: ChainFlowEstadoRetiroDto,
+    context: RequestContext,
+  ) {
+    const payout = await this.resolvePayout(dto, context);
     return this.toChainFlowResponse(payout, 'Estado de retiro consultado.');
   }
 
-  private resolvePayout(dto: ChainFlowEstadoRetiroDto): PayoutResponse {
-    if (dto.payoutId) return this.payouts.getPayout(dto.payoutId);
+  private async resolvePayout(
+    dto: ChainFlowEstadoRetiroDto,
+    context: RequestContext,
+  ): Promise<PayoutResponse> {
+    if (dto.payoutId) return this.payouts.getPayout(dto.payoutId, context);
 
     // Try canonical identifiers in priority order
     const identifiers = [
@@ -83,18 +66,19 @@ export class ChainFlowService {
     }
 
     for (const id of identifiers) {
-      const payout = this.tryGetPayoutByExternalId(id);
+      const payout = await this.tryGetPayoutByExternalId(id, context);
       if (payout) return payout;
     }
 
     // Fallback: scan metadata for a ChainFlow field match
-    const payoutByMeta = this.payouts
-      .listPayouts({})
-      .find((p) => this.matchesChainFlowLookup(p, identifiers));
+    const payouts = await this.payouts.listPayouts({}, context);
+    const payoutByMeta = payouts.find((p) =>
+      this.matchesChainFlowLookup(p, identifiers),
+    );
     if (payoutByMeta) return payoutByMeta;
 
     // Final throw via externalId (will 404 with a clean message)
-    return this.payouts.getPayoutByExternalId(identifiers[0]);
+    return this.payouts.getPayoutByExternalId(identifiers[0], context);
   }
 
   private toCreatePayoutDto(dto: ChainFlowRetiroDto): CreatePayoutDto {
@@ -150,11 +134,7 @@ export class ChainFlowService {
     };
   }
 
-  private toChainFlowResponse(
-    payout: PayoutResponse,
-    mensaje: string,
-    risk?: unknown,
-  ) {
+  private toChainFlowResponse(payout: PayoutResponse, mensaje: string) {
     const chainFlow = this.chainFlowMetadata(payout);
     return {
       codigo: '00',
@@ -178,7 +158,6 @@ export class ChainFlowService {
       monto: payout.amount,
       creadoEn: payout.createdAt,
       actualizadoEn: payout.updatedAt,
-      risk,
     };
   }
 
@@ -195,9 +174,12 @@ export class ChainFlowService {
     );
   }
 
-  private tryGetPayoutByExternalId(externalId: string): PayoutResponse | null {
+  private async tryGetPayoutByExternalId(
+    externalId: string,
+    context: RequestContext,
+  ): Promise<PayoutResponse | null> {
     try {
-      return this.payouts.getPayoutByExternalId(externalId);
+      return await this.payouts.getPayoutByExternalId(externalId, context);
     } catch {
       return null;
     }

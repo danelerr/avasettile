@@ -11,14 +11,10 @@ export type AuditEventType =
   | 'PAYIN_SWEPT'
   | 'PAYIN_SWEEP_FAILED'
   | 'PAYIN_ACCEPTED'
-  | 'PAYIN_TOPUP'
-  | 'PRIVATE_SETTLEMENT_CREATED'
-  | 'SETTLEMENT_CREATED'
-  | 'SETTLEMENT_COMPLETED'
-  | 'RISK_ASSESSED';
+  | 'PAYIN_TOPUP';
 
 export type AuditActor = {
-  institutionId: string | null;
+  clientId: string | null;
   actor: string | null;
   correlationId: string | null;
   sourceIp: string | null;
@@ -26,6 +22,7 @@ export type AuditActor = {
 
 export type AuditEvent = {
   id: string;
+  clientId: string | null;
   type: AuditEventType;
   subjectId: string;
   actor: AuditActor;

@@ -27,7 +27,9 @@ export class OutboundHttpLogger {
     if (init.body) {
       if (typeof init.body === 'string') {
         try {
-          outboundPayload = JSON.stringify(sanitizeJson(JSON.parse(init.body) as unknown));
+          outboundPayload = JSON.stringify(
+            sanitizeJson(JSON.parse(init.body) as unknown),
+          );
         } catch {
           outboundPayload = sanitizeQueryString(init.body);
         }
@@ -37,7 +39,9 @@ export class OutboundHttpLogger {
     }
 
     const outboundHeaders: Record<string, string> = {};
-    headers.forEach((v, k) => { outboundHeaders[k] = v; });
+    headers.forEach((v, k) => {
+      outboundHeaders[k] = v;
+    });
 
     this.logger.log(
       JSON.stringify({
@@ -62,15 +66,21 @@ export class OutboundHttpLogger {
       const text = await cloned.text();
       if (text) {
         try {
-          inboundPayload = JSON.stringify(sanitizeJson(JSON.parse(text) as unknown));
+          inboundPayload = JSON.stringify(
+            sanitizeJson(JSON.parse(text) as unknown),
+          );
         } catch {
           inboundPayload = text.slice(0, 2_000);
         }
       }
-    } catch { /* ignore if response body unreadable */ }
+    } catch {
+      /* ignore if response body unreadable */
+    }
 
     const inboundHeaders: Record<string, string> = {};
-    response.headers.forEach((v, k) => { inboundHeaders[k] = v; });
+    response.headers.forEach((v, k) => {
+      inboundHeaders[k] = v;
+    });
 
     this.logger.log(
       JSON.stringify({

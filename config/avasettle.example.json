@@ -5,15 +5,11 @@
   "explorerBaseUrl": null,
   "corsOrigins": "*",
 
-  "storage": {
-    "driver": "json",
-    "filePath": "data/avasettle-ledger.json",
-    "database": {
-      "ssl": false,
-      "maxConnections": 5,
-      "runtimeStateKey": "default",
-      "autoMigrate": false
-    }
+  "database": {
+    "ssl": false,
+    "sslRejectUnauthorized": true,
+    "maxConnections": 5,
+    "autoMigrate": true
   },
 
   "payin": {
@@ -42,26 +38,11 @@
     "waitForReceipt": false
   },
 
-  "settlement": {
-    "fiatCurrency": "USD",
-    "fiatRate": 1.0
-  },
-
-  "risk": {
-    "reviewAmount": 10000,
-    "rejectAmount": 50000
-  },
-
   "webhook": {
-    "url": null,
     "retryAttempts": 3
   },
 
   "autoReconcileIntervalSeconds": null,
-  "throttleRps": 100,
-
-  "privacy": {
-    "mode": "off",
-    "eercContractAddress": null
-  }
+  "autoSweep": false,
+  "throttleRps": 100
 }

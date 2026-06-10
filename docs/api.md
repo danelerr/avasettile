@@ -6,27 +6,70 @@ Base URL: `http://localhost:3001` (dev) · `https://<cloud-run-url>` (prod)
 
 ## Authentication
 
-All `/v1/*` and `/api/*` endpoints require an API key. Public endpoints (`/`, `/health`, `/health/readiness`) do not.
+AvaSettle is multi-tenant. There are two kinds of keys:
 
-**Header options (either works):**
+| Key | Used for | Header |
+|---|---|---|
+| **Admin key** (`AVASETTLE_ADMIN_API_KEY`) | Client management (`/v1/admin/clients*`), global reconciliation, sweep queue | `x-avasettle-api-key` |
+| **Client key** (issued per institution) | All business endpoints (`/v1/*`, `/api/*`) — scoped to that client's data | `x-avasettle-api-key` or `Authorization: Bearer` |
+
+Public endpoints (`/`, `/health`, `/health/readiness`) require no key.
+
+**Header options (either works for client keys):**
 
 ```http
-x-avasettle-api-key: your-api-key
+x-avasettle-api-key: avk_...
 ```
 ```http
-Authorization: Bearer your-api-key
+Authorization: Bearer avk_...
 ```
 
 **Common request headers:**
 
 ```http
-x-institution-id: my-fintech
 x-correlation-id: req-20260609-001
 idempotency-key: payin-invoice-0001
 content-type: application/json
 ```
 
-`idempotency-key` prevents duplicate creation — if the same key is reused, the existing record is returned unchanged.
+`idempotency-key` prevents duplicate creation — if the same key is reused by the same client, the existing record is returned unchanged.
+
+---
+
+## Clients (admin)
+
+All endpoints below require the **admin key**.
+
+### `POST /v1/admin/clients`
+
+Register a client (institution) and issue its API key. The plaintext key appears **only in this response** — only its SHA-256 hash is stored.
+
+```json
+{
+  "name": "Fintech LATAM SA",
+  "webhookUrl": "https://api.fintech-latam.example/avasettle/webhooks",
+  "webhookSecret": "hook-signing-secret",
+  "metadata": { "country": "BO" }
+}
+```
+
+Response includes `apiKey` (e.g. `avk_<48 hex chars>`) and `apiKeyPrefix` for later identification.
+
+### `GET /v1/admin/clients`
+
+List clients (never includes keys or webhook secrets).
+
+### `GET /v1/admin/clients/:id`
+
+Get client detail.
+
+### `PATCH /v1/admin/clients/:id`
+
+Update name, `status` (`active` / `disabled`), `webhookUrl`, `webhookSecret`, or metadata. Disabled clients are rejected on every API call.
+
+### `POST /v1/admin/clients/:id/rotate-key`
+
+Invalidates the current key immediately and returns a new plaintext key once.
 
 ---
 
@@ -353,9 +396,9 @@ Check on-chain receipt and update payout status.
 
 ## Reconciliation
 
-### `POST /v1/reconciliation/run`
+### `POST /v1/reconciliation/run` (admin)
 
-Manually trigger reconciliation for all open payins and broadcasted payouts.
+Manually trigger reconciliation for all open payins and broadcasted payouts across every client. Requires the admin key.
 
 Processes up to 10 records concurrently. Returns a summary:
 
@@ -442,18 +485,13 @@ Aggregate counts and volumes.
     "expectedVolumeByAsset": { "USDC": "12500.00" },
     "receivedVolumeByAsset": { "USDC": "12480.00" },
     "sweptVolumeByAsset": { "USDC": "12480.00" }
-  },
-  "settlements": {
-    "count": 8,
-    "byStatus": { "completed": 8 },
-    "fiatVolumeByCurrency": { "USD": "12480.00" }
   }
 }
 ```
 
 ---
 
-### `GET /v1/reports/sweep-queue`
+### `GET /v1/reports/sweep-queue` (admin)
 
 Lists confirmed pay-ins whose sweep is still pending or failed. Use this as an operator dashboard for treasury consolidation.
 
@@ -527,85 +565,6 @@ Lists recent webhook delivery attempts. Requires PostgreSQL storage.
 
 ---
 
-## Settlement (simulated)
-
-### `POST /v1/settlements`
-
-Create a simulated fiat settlement record.
-
-```json
-{
-  "sourceType": "payin",
-  "sourceId": "payin-uuid",
-  "cryptoAmount": "100.00",
-  "asset": "USDC"
-}
-```
-
-Calculates `fiatAmount = cryptoAmount × fiatRate`. Stores the record with `status: pending`.
-
-### `GET /v1/settlements`
-
-List settlements. Supports `?status=pending|completed|failed`.
-
-### `GET /v1/settlements/:id`
-
-Get settlement detail.
-
-### `POST /v1/settlements/:id/complete`
-
-Mark settlement as completed.
-
----
-
-## Risk (mock)
-
-### `POST /v1/risk/assess`
-
-Run mock risk scoring before payout creation.
-
-```json
-{
-  "type": "payout",
-  "amount": "500.00",
-  "asset": "USDC",
-  "address": "0x1111111111111111111111111111111111111111"
-}
-```
-
-Returns `approve`, `review`, or `reject` based on configured thresholds (`riskReviewAmount`, `riskRejectAmount`). This is the integration point for a future real risk provider (e.g., Wavy Node).
-
----
-
-## Privacy (experimental)
-
-Requires `AVASETTLE_PRIVACY_MODE=metadata-redaction` or `eerc-experimental`.
-
-### `POST /v1/privacy/settlements`
-
-Create a private settlement receipt using commitment hashing. Does not submit an on-chain transaction in the current version.
-
-```json
-{
-  "mode": "metadata-redaction",
-  "subjectType": "payin",
-  "subjectId": "uuid",
-  "asset": "USDC",
-  "publicAmount": "100.00",
-  "counterpartyId": "merchant-001"
-}
-```
-
-### `GET /v1/privacy/settlements`
-
-List private receipts.
-
-### `GET /v1/privacy/settlements/:id`
-
-Get private receipt detail.
-
----
-
 ## Chain Flow compatibility endpoints
 
 These endpoints implement the exact Chain Flow PSP protocol for drop-in integration with existing Chain Flow orchestrators.
@@ -636,7 +595,6 @@ Field mapping:
 | `tnMoneda=2` | `asset=USDT` |
 | `tcCuentaDestino` | `beneficiaryAddress` |
 
-Also runs the mock risk check. Returns `codigo: "01"` on rejection.
 
 **Success response:**
 
@@ -821,16 +779,14 @@ All values can be set via env var or `config/avasettle.json`. Env vars take prec
 | `AVASETTLE_RPC_URL` | `rpcUrl` | Avalanche public RPC | Custom RPC endpoint |
 | `AVASETTLE_EXPLORER_BASE_URL` | `explorerBaseUrl` | Snowtrace | Block explorer base URL |
 | `AVASETTLE_CORS_ORIGINS` | `corsOrigins` | `*` | Comma-separated origins or `*` |
-| `AVASETTLE_API_KEY` | — | — | **Secret.** B2B authentication key |
+| `AVASETTLE_ADMIN_API_KEY` | — | — | **Secret.** Platform-operator key for client management |
 | `AVASETTLE_TREASURY_PRIVATE_KEY` | — | — | **Secret.** Treasury hot wallet key |
 | `AVASETTLE_PAYIN_MNEMONIC` | — | — | **Secret.** BIP-39 mnemonic for address derivation |
-| `AVASETTLE_DATABASE_URL` | — | — | **Secret.** PostgreSQL connection string |
-| `AVASETTLE_WEBHOOK_SECRET` | — | — | **Secret.** HMAC signing key for webhooks |
-| `AVASETTLE_STORAGE_DRIVER` | `storage.driver` | `json` | `json` or `postgres` |
-| `AVASETTLE_STORAGE_FILE` | `storage.filePath` | `data/avasettle-ledger.json` | JSON file path |
-| `AVASETTLE_DATABASE_SSL` | `storage.database.ssl` | `false` | PostgreSQL TLS |
-| `AVASETTLE_DATABASE_MAX_CONNECTIONS` | `storage.database.maxConnections` | `5` | pg pool size |
-| `AVASETTLE_DATABASE_AUTO_MIGRATE` | `storage.database.autoMigrate` | `true` | Run migrations on startup |
+| `AVASETTLE_DATABASE_URL` | — | — | **Secret.** PostgreSQL connection string (required) |
+| `AVASETTLE_DATABASE_SSL` | `database.ssl` | `false` | PostgreSQL TLS |
+| `AVASETTLE_DATABASE_SSL_REJECT_UNAUTHORIZED` | `database.sslRejectUnauthorized` | `true` | Verify the server certificate |
+| `AVASETTLE_DATABASE_MAX_CONNECTIONS` | `database.maxConnections` | `5` | pg pool size |
+| `AVASETTLE_DATABASE_AUTO_MIGRATE` | `database.autoMigrate` | `true` | Run migrations on startup |
 | `AVASETTLE_PAYIN_LOOKBACK_BLOCKS` | `payin.lookbackBlocks` | `50000` | Blocks scanned from `startBlock` |
 | `AVASETTLE_PAYIN_DERIVATION_ACCOUNT` | `payin.derivationAccount` | `0` | BIP-44 account index |
 | `AVASETTLE_PAYIN_DEFAULT_EXPIRATION_MINUTES` | `payin.defaultExpirationMinutes` | `null` | Default expiry if not specified per-request |
@@ -844,17 +800,10 @@ All values can be set via env var or `config/avasettle.json`. Env vars take prec
 | `AVASETTLE_MAX_PAYOUT_USDT` | `assets.USDT.maxPayoutAmount` | — | |
 | `AVASETTLE_MIN_CONFIRMATIONS` | `blockchain.minConfirmations` | `2` | Blocks after transfer before `confirmed` |
 | `AVASETTLE_WAIT_FOR_RECEIPT` | `blockchain.waitForReceipt` | `false` | Wait for receipt before returning txHash |
-| `AVASETTLE_SETTLEMENT_FIAT_CURRENCY` | `settlement.fiatCurrency` | `USD` | Fiat currency for simulated settlement |
-| `AVASETTLE_SETTLEMENT_FIAT_RATE` | `settlement.fiatRate` | `1` | crypto→fiat conversion rate |
-| `AVASETTLE_RISK_REVIEW_AMOUNT` | `risk.reviewAmount` | `10000` | Mock review threshold |
-| `AVASETTLE_RISK_REJECT_AMOUNT` | `risk.rejectAmount` | `50000` | Mock reject threshold |
-| `AVASETTLE_WEBHOOK_URL` | `webhook.url` | `null` | Delivery endpoint for events |
 | `AVASETTLE_WEBHOOK_RETRY_ATTEMPTS` | `webhook.retryAttempts` | `3` | Max retry attempts (delays: 1s, 5s, 30s) |
 | `AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS` | `autoReconcileIntervalSeconds` | `null` | Enable auto-reconciliation (min: 10s) |
 | `AVASETTLE_AUTO_SWEEP` | `autoSweep` | `false` | Auto topup+sweep after pay-in confirmation |
 | `AVASETTLE_THROTTLE_RPS` | `throttleRps` | `100` | Rate limit per IP (in-memory) |
-| `AVASETTLE_PRIVACY_MODE` | `privacy.mode` | `off` | `off`, `metadata-redaction`, `eerc-experimental` |
-| `AVASETTLE_EERC_CONTRACT_ADDRESS` | `privacy.eercContractAddress` | `null` | eERC contract for experimental mode |
 | `LOGGING_WIPED_KEYS` | — | See defaults | Comma-separated extra keys to wipe from logs |
 | `LOGGING_PROTECTED_KEYS` | — | See defaults | Comma-separated extra keys to partially mask |
 
@@ -879,8 +828,6 @@ All values can be set via env var or `config/avasettle.json`. Env vars take prec
 
 6. If autoSweep=false, call POST /v1/payins/:id/topup-and-sweep
    → Treasury tops up AVAX, then sweeps USDC to treasury wallet
-
-7. Optional: call POST /v1/settlements to record the fiat equivalent
 ```
 
 ## Integration walkthrough: payout flow

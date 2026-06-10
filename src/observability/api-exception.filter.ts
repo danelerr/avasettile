@@ -11,7 +11,11 @@ import { currentTrace } from './trace-context';
 type HttpExceptionLike = { getStatus(): number; getResponse(): unknown };
 
 function isHttpException(e: unknown): e is HttpExceptionLike {
-  return typeof e === 'object' && e !== null && typeof (e as Record<string, unknown>)['getStatus'] === 'function';
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    typeof (e as Record<string, unknown>)['getStatus'] === 'function'
+  );
 }
 
 /**
@@ -40,12 +44,12 @@ export class ApiExceptionFilter implements ExceptionFilter {
       try {
         exceptionValue = JSON.stringify(exception.getResponse());
       } catch {
-        exceptionValue = String(exception);
+        exceptionValue = 'Unserializable exception response.';
       }
     } else if (exception instanceof Error) {
       exceptionValue = exception.message;
     } else {
-      exceptionValue = String(exception);
+      exceptionValue = JSON.stringify(exception) ?? 'Unknown error';
     }
 
     const entry = {
@@ -69,11 +73,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
 
     if (!res.headersSent) {
-      res.status(status).json(
-        isHttpException(exception)
-          ? exception.getResponse()
-          : { statusCode: status, message: 'Internal server error' },
-      );
+      res
+        .status(status)
+        .json(
+          isHttpException(exception)
+            ? exception.getResponse()
+            : { statusCode: status, message: 'Internal server error' },
+        );
     }
   }
 }

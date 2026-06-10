@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
@@ -7,8 +7,18 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsISO8601, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
-import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
+import {
+  IsBoolean,
+  IsISO8601,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
+import { AdminApiKeyGuard } from '../auth/admin-api-key.guard';
+import { ClientApiKeyGuard } from '../auth/client-api-key.guard';
+import type { AuthenticatedRequest } from '../auth/client-api-key.guard';
 import { ReportsService } from './reports.service';
 
 class AuditTrailQueryDto {
@@ -24,18 +34,18 @@ class WebhookDeliveriesQueryDto {
 }
 
 @ApiTags('reports')
-@ApiSecurity('avasettle-api-key')
-@ApiSecurity('chain-flow-bearer')
 @Controller('v1/reports')
-@UseGuards(ApiKeyGuard)
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
   @Get('summary')
+  @UseGuards(ClientApiKeyGuard)
+  @ApiSecurity('avasettle-api-key')
+  @ApiSecurity('chain-flow-bearer')
   @ApiOperation({
-    summary: 'Get institutional summary report',
+    summary: 'Get operational summary report',
     description:
-      'Returns operational counts and volumes for payouts, pay-ins, and simulated fiat settlements.',
+      'Returns operational counts and volumes for the calling client: payouts and pay-ins by status, collection mode, sweep status, and asset.',
   })
   @ApiOkResponse({
     schema: {
@@ -55,15 +65,17 @@ export class ReportsController {
       },
     },
   })
-  getSummary() {
-    return this.reports.getInstitutionalSummary();
+  getSummary(@Req() request: AuthenticatedRequest) {
+    return this.reports.getInstitutionalSummary(request.avasettleClient!.id);
   }
 
   @Get('sweep-queue')
+  @UseGuards(AdminApiKeyGuard)
+  @ApiSecurity('avasettle-admin-key')
   @ApiOperation({
-    summary: 'Get confirmed pay-ins pending sweep',
+    summary: 'Get confirmed pay-ins pending sweep (admin)',
     description:
-      'Lists confirmed pay-ins whose sweep is still pending or failed. Useful for treasury operators to know which deposit addresses hold funds waiting to be consolidated.',
+      'Lists confirmed pay-ins of every client whose sweep is still pending or failed. Treasury-operator endpoint: shows which deposit addresses hold funds waiting to be consolidated.',
   })
   @ApiOkResponse({
     schema: {
@@ -73,6 +85,7 @@ export class ReportsController {
         items: [
           {
             id: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10',
+            clientId: '0b9af3a1-2f4f-4c39-9d3f-1a2b3c4d5e6f',
             externalId: 'payin-0001',
             depositAddress: '0x1111111111111111111111111111111111111111',
             asset: 'USDC',
@@ -88,10 +101,13 @@ export class ReportsController {
   }
 
   @Get('webhook-deliveries')
+  @UseGuards(ClientApiKeyGuard)
+  @ApiSecurity('avasettle-api-key')
+  @ApiSecurity('chain-flow-bearer')
   @ApiOperation({
     summary: 'List webhook delivery attempts',
     description:
-      'Returns recent webhook delivery records. Requires PostgreSQL storage. Use ?failed=true to show only failures.',
+      'Returns recent webhook delivery records for the calling client. Use ?failed=true to show only failures.',
   })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiQuery({ name: 'failed', required: false, example: true })
@@ -115,19 +131,41 @@ export class ReportsController {
       },
     },
   })
-  getWebhookDeliveries(@Query() query: WebhookDeliveriesQueryDto) {
-    return this.reports.getWebhookDeliveries(query.limit ?? 50, query.failed);
+  getWebhookDeliveries(
+    @Query() query: WebhookDeliveriesQueryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.reports.getWebhookDeliveries(
+      request.avasettleClient!.id,
+      query.limit ?? 50,
+      query.failed,
+    );
   }
 
   @Get('audit')
+  @UseGuards(ClientApiKeyGuard)
+  @ApiSecurity('avasettle-api-key')
+  @ApiSecurity('chain-flow-bearer')
   @ApiOperation({
     summary: 'Export audit trail',
     description:
-      'Returns audit events filtered by date range, subject, and optional limit. Maximum 1000 events per call.',
+      'Returns audit events of the calling client filtered by date range, subject, and optional limit. Maximum 1000 events per call.',
   })
-  @ApiQuery({ name: 'from', required: false, example: '2026-06-01T00:00:00.000Z' })
-  @ApiQuery({ name: 'to', required: false, example: '2026-06-09T23:59:59.999Z' })
-  @ApiQuery({ name: 'subjectId', required: false, example: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10' })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    example: '2026-06-01T00:00:00.000Z',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    example: '2026-06-09T23:59:59.999Z',
+  })
+  @ApiQuery({
+    name: 'subjectId',
+    required: false,
+    example: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10',
+  })
   @ApiQuery({ name: 'limit', required: false, example: 200 })
   @ApiOkResponse({
     schema: {
@@ -139,7 +177,7 @@ export class ReportsController {
             id: 'abc',
             type: 'PAYIN_CREATED',
             subjectId: '9d8f9b5a',
-            actor: { institutionId: 'fintech-01', correlationId: null },
+            actor: { clientId: '0b9af3a1', correlationId: null },
             payload: {},
             createdAt: '2026-06-09T10:00:00.000Z',
           },
@@ -147,8 +185,12 @@ export class ReportsController {
       },
     },
   })
-  getAuditTrail(@Query() query: AuditTrailQueryDto) {
+  getAuditTrail(
+    @Query() query: AuditTrailQueryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
     return this.reports.getAuditTrail(
+      request.avasettleClient!.id,
       query.from,
       query.to,
       query.subjectId,

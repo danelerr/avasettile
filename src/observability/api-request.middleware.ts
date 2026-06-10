@@ -22,11 +22,17 @@ export class ApiRequestMiddleware implements NestMiddleware {
 
     const method = req.method;
     const path = req.path;
-    const remoteAddress = (req.ip ?? req.socket?.remoteAddress ?? '').replace(/^::ffff:/, '');
+    const remoteAddress = (req.ip ?? req.socket?.remoteAddress ?? '').replace(
+      /^::ffff:/,
+      '',
+    );
 
     // Format: [key:value][key:value]... (midd-library header format)
     const headers = Object.entries(req.headers)
-      .map(([k, v]) => `[${k}:${Array.isArray(v) ? v.join(',') : String(v ?? '')}]`)
+      .map(
+        ([k, v]) =>
+          `[${k}:${Array.isArray(v) ? v.join(',') : String(v ?? '')}]`,
+      )
       .join('');
 
     const queryParameters =
@@ -35,12 +41,20 @@ export class ApiRequestMiddleware implements NestMiddleware {
         : undefined;
 
     let requestBody: string | undefined;
-    if (req.body && typeof req.body === 'object' && Object.keys(req.body as object).length) {
+    if (
+      req.body &&
+      typeof req.body === 'object' &&
+      Object.keys(req.body as object).length
+    ) {
       try {
-        requestBody = JSON.stringify(sanitizeJson(req.body as Record<string, unknown>));
-      } catch { /* non-JSON body */ }
-    } else if (typeof req.body === 'string' && (req.body as string).length > 0) {
-      requestBody = sanitizeQueryString(req.body as string);
+        requestBody = JSON.stringify(
+          sanitizeJson(req.body as Record<string, unknown>),
+        );
+      } catch {
+        /* non-JSON body */
+      }
+    } else if (typeof req.body === 'string' && req.body.length > 0) {
+      requestBody = sanitizeQueryString(req.body);
     }
 
     // Intercept res.json to capture the sanitized response body before it's sent
@@ -51,7 +65,9 @@ export class ApiRequestMiddleware implements NestMiddleware {
         if (body !== null && body !== undefined) {
           responseBody = JSON.stringify(sanitizeJson(body));
         }
-      } catch { /* ignore capture errors */ }
+      } catch {
+        /* ignore capture errors */
+      }
       return originalJson(body);
     };
 
@@ -62,7 +78,8 @@ export class ApiRequestMiddleware implements NestMiddleware {
         statusCode >= 500 ? 'error' : statusCode >= 400 ? 'warn' : 'log';
 
       // Authenticated user identity if set by auth guard
-      const user = (req as Request & { user?: { id?: string; sub?: string } }).user?.id ??
+      const user =
+        (req as Request & { user?: { id?: string; sub?: string } }).user?.id ??
         (req as Request & { user?: { id?: string; sub?: string } }).user?.sub ??
         undefined;
 

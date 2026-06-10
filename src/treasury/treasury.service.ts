@@ -29,10 +29,6 @@ export class TreasuryService {
         minConfirmations: this.configuration.minConfirmations,
         waitForReceipt: this.configuration.waitForReceipt,
       },
-      privacy: {
-        mode: this.configuration.privacyMode,
-        eercContractAddress: this.configuration.eercContractAddress,
-      },
     };
   }
 

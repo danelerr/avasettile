@@ -13,14 +13,12 @@ curl_json() {
     curl -sS -X "$method" "${API_BASE_URL}${path}" \
       -H "content-type: application/json" \
       -H "x-avasettle-api-key: ${AVASETTLE_API_KEY}" \
-      -H "x-institution-id: chain-flow" \
       -H "x-correlation-id: ${DEMO_EXTERNAL_ID:-demo-local}" \
       -H "idempotency-key: ${DEMO_EXTERNAL_ID:-demo-local}" \
       --data "$body"
   else
     curl -sS -X "$method" "${API_BASE_URL}${path}" \
       -H "x-avasettle-api-key: ${AVASETTLE_API_KEY}" \
-      -H "x-institution-id: chain-flow" \
       -H "x-correlation-id: ${DEMO_EXTERNAL_ID:-demo-local}" \
       -H "idempotency-key: ${DEMO_EXTERNAL_ID:-demo-local}"
   fi

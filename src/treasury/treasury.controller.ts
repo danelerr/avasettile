@@ -6,7 +6,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
+import { ClientApiKeyGuard } from '../auth/client-api-key.guard';
 import { TreasuryService } from './treasury.service';
 
 @ApiTags('treasury')
@@ -16,7 +16,7 @@ import { TreasuryService } from './treasury.service';
   description: 'Missing or invalid AvaSettle API key.',
 })
 @Controller('v1/treasury')
-@UseGuards(ApiKeyGuard)
+@UseGuards(ClientApiKeyGuard)
 export class TreasuryController {
   constructor(private readonly treasury: TreasuryService) {}
 

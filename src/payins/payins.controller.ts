@@ -2,11 +2,10 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
-  Ip,
   Param,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -19,7 +18,8 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { ApiKeyGuard } from '../auth/api-key/api-key.guard';
+import { ClientApiKeyGuard } from '../auth/client-api-key.guard';
+import type { AuthenticatedRequest } from '../auth/client-api-key.guard';
 import { extractRequestContext } from '../common/request-context.util';
 import { AcceptPayInDto } from './dto/accept-payin.dto';
 import { CreatePayInDto } from './dto/create-payin.dto';
@@ -56,7 +56,7 @@ const payInExample = {
   description: 'Missing or invalid AvaSettle API key.',
 })
 @Controller('v1/payins')
-@UseGuards(ApiKeyGuard)
+@UseGuards(ClientApiKeyGuard)
 export class PayinsController {
   constructor(private readonly payins: PayinsService) {}
 
@@ -73,29 +73,31 @@ export class PayinsController {
   })
   createPayIn(
     @Body() dto: CreatePayInDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.payins.createPayIn(dto, extractRequestContext(headers, sourceIp));
+    return this.payins.createPayIn(dto, extractRequestContext(request));
   }
 
   @Get()
   @ApiOperation({
     summary: 'List pay-ins',
     description:
-      'Lists pay-in requests and supports filtering by status or externalId.',
+      'Lists pay-in requests of the calling client; supports filtering by status or externalId.',
   })
   @ApiOkResponse({ schema: { example: [payInExample] } })
-  listPayIns(@Query() query: ListPayInsQueryDto) {
-    return this.payins.listPayIns(query);
+  listPayIns(
+    @Query() query: ListPayInsQueryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.payins.listPayIns(query, extractRequestContext(request));
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get pay-in by id' })
   @ApiParam({ name: 'id', example: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10' })
   @ApiOkResponse({ schema: { example: payInExample } })
-  getPayIn(@Param('id') id: string) {
-    return this.payins.getPayIn(id);
+  getPayIn(@Param('id') id: string, @Req() request: AuthenticatedRequest) {
+    return this.payins.getPayIn(id, extractRequestContext(request));
   }
 
   @Post(':id/reconcile')
@@ -110,10 +112,9 @@ export class PayinsController {
   })
   reconcilePayIn(
     @Param('id') id: string,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.payins.reconcilePayIn(id, extractRequestContext(headers, sourceIp));
+    return this.payins.reconcilePayIn(id, extractRequestContext(request));
   }
 
   @Post(':id/sweep')
@@ -138,13 +139,12 @@ export class PayinsController {
   sweepPayIn(
     @Param('id') id: string,
     @Body() dto: SweepPayInDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
     return this.payins.sweepPayIn(
       id,
       dto ?? {},
-      extractRequestContext(headers, sourceIp),
+      extractRequestContext(request),
     );
   }
 
@@ -169,13 +169,12 @@ export class PayinsController {
   acceptPayIn(
     @Param('id') id: string,
     @Body() dto: AcceptPayInDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
     return this.payins.acceptPayIn(
       id,
       dto ?? {},
-      extractRequestContext(headers, sourceIp),
+      extractRequestContext(request),
     );
   }
 
@@ -199,13 +198,12 @@ export class PayinsController {
   topUpPayIn(
     @Param('id') id: string,
     @Body() dto: TopUpPayInDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
     return this.payins.topUpPayIn(
       id,
       dto ?? {},
-      extractRequestContext(headers, sourceIp),
+      extractRequestContext(request),
     );
   }
 
@@ -220,7 +218,7 @@ export class PayinsController {
   @ApiOkResponse({
     schema: {
       example: {
-        id: '9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10',
+        ...payInExample,
         status: 'confirmed',
         sweepStatus: 'broadcasted',
         sweepTransactionHash: '0xaaa...',
@@ -230,13 +228,12 @@ export class PayinsController {
   topUpAndSweep(
     @Param('id') id: string,
     @Body() dto: TopUpAndSweepDto,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Ip() sourceIp: string,
+    @Req() request: AuthenticatedRequest,
   ) {
     return this.payins.topUpAndSweep(
       id,
       dto ?? {},
-      extractRequestContext(headers, sourceIp),
+      extractRequestContext(request),
     );
   }
 }

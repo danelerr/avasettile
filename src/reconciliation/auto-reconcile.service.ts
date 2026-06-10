@@ -8,7 +8,8 @@ import { ConfigurationService } from '../configuration/configuration.service';
 import { ReconciliationService } from './reconciliation.service';
 
 const SYSTEM_CONTEXT = {
-  institutionId: null,
+  clientId: null,
+  clientName: null,
   correlationId: null,
   idempotencyKey: null,
   actor: 'auto-reconcile',

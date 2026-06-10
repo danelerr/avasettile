@@ -6,6 +6,7 @@ import { PayoutStatus, RequestContext } from '../payouts/payout.types';
 import { ReconciliationRunResult } from './reconciliation.types';
 
 const RECONCILIATION_CONCURRENCY = 10;
+const BATCH_LIMIT = 1000;
 
 @Injectable()
 export class ReconciliationService {
@@ -18,23 +19,34 @@ export class ReconciliationService {
     const startedAt = new Date().toISOString();
     const now = Date.now();
 
-    const payoutCandidates = this.payouts.listPayouts({
-      status: PayoutStatus.Broadcasted,
-    });
+    const payoutCandidates = await this.payouts.listPayouts(
+      { status: PayoutStatus.Broadcasted, limit: BATCH_LIMIT },
+      context,
+    );
 
     // Pending payins that have already expired are excluded — no blockchain
     // scan needed since reconcilePayIn would immediately mark them Expired
     // without any transfer activity. Detected/Underpaid still need scanning
     // because funds have already arrived and may still confirm.
-    const pendingCandidates = this.payins
-      .listPayIns({ status: PayInStatus.Pending })
-      .filter((p) => !p.expiresAt || new Date(p.expiresAt).getTime() > now);
+    const [pending, detected, underpaid] = await Promise.all([
+      this.payins.listPayIns(
+        { status: PayInStatus.Pending, limit: BATCH_LIMIT },
+        context,
+      ),
+      this.payins.listPayIns(
+        { status: PayInStatus.Detected, limit: BATCH_LIMIT },
+        context,
+      ),
+      this.payins.listPayIns(
+        { status: PayInStatus.Underpaid, limit: BATCH_LIMIT },
+        context,
+      ),
+    ]);
+    const pendingCandidates = pending.filter(
+      (p) => !p.expiresAt || new Date(p.expiresAt).getTime() > now,
+    );
 
-    const payinCandidates = [
-      ...pendingCandidates,
-      ...this.payins.listPayIns({ status: PayInStatus.Detected }),
-      ...this.payins.listPayIns({ status: PayInStatus.Underpaid }),
-    ];
+    const payinCandidates = [...pendingCandidates, ...detected, ...underpaid];
 
     const results: ReconciliationRunResult['results'] = [];
 

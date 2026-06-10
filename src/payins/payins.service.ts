@@ -52,7 +52,10 @@ export class PayinsService {
   ): Promise<PayInResponse> {
     // Idempotency key: if the same key was used in a prior request, return that result.
     if (context.idempotencyKey) {
-      const prior = this.ledger.findByIdempotencyKey(context.idempotencyKey);
+      const prior = await this.ledger.findByIdempotencyKey(
+        context.clientId,
+        context.idempotencyKey,
+      );
       if (prior) return this.toResponse(prior, true);
     }
 
@@ -78,72 +81,65 @@ export class PayinsService {
       ? new Date(now.getTime() + expirationMinutes * 60_000).toISOString()
       : null;
 
-    // For Postgres deployments, claim the derivation index from the SQL counter
-    // table atomically so multiple instances never derive the same address.
-    let preClaimedIndex: number | undefined;
-    if (
-      this.configuration.storageDriver === 'postgres' &&
-      collectionMode !== PayInCollectionMode.PaymentRouter
-    ) {
-      const claimed = await this.database.claimNextPayInIndex();
-      if (claimed !== null) preClaimedIndex = claimed;
-    }
+    // The SQL counter is claimed atomically so concurrent instances never
+    // derive the same address. A claimed index is discarded (never reused)
+    // when the externalId turns out to already exist.
+    const derivationIndex = isRouterMode
+      ? -1
+      : await this.database.claimNextPayInIndex();
+    const depositAddress: `0x${string}` =
+      routerAddress ?? this.blockchain.derivePayInAddress(derivationIndex);
 
-    // Atomically check for existing externalId and allocate derivation index in one update.
-    const { record, existed } = this.ledger.findOrCreate(
-      dto.externalId,
+    const { record, existed } = await this.ledger.createOrGetExisting({
+      id: randomUUID(),
+      clientId: context.clientId,
+      externalId: dto.externalId,
+      chainFlowRequestId: dto.chainFlowRequestId ?? null,
+      status: PayInStatus.Pending,
+      network: this.configuration.settlementNetwork,
+      chainId: this.configuration.networkSummary.chainId,
+      asset: dto.asset,
+      tokenAddress: assetConfig.address!,
+      expectedAmount: dto.amount,
+      expectedAmountAtomic: expectedAmountAtomic.toString(),
+      receivedAmount: '0',
+      receivedAmountAtomic: '0',
+      depositAddress,
+      derivationIndex,
       collectionMode,
-      (derivationIndex) => {
-        const depositAddress: `0x${string}` =
-          routerAddress ?? this.blockchain.derivePayInAddress(derivationIndex);
-        return {
-          id: randomUUID(),
-          externalId: dto.externalId,
-          chainFlowRequestId: dto.chainFlowRequestId ?? null,
-          status: PayInStatus.Pending,
-          network: this.configuration.settlementNetwork,
-          chainId: this.configuration.networkSummary.chainId,
-          asset: dto.asset,
-          tokenAddress: assetConfig.address!,
-          expectedAmount: dto.amount,
-          expectedAmountAtomic: expectedAmountAtomic.toString(),
-          receivedAmount: '0',
-          receivedAmountAtomic: '0',
-          depositAddress,
-          derivationIndex,
-          collectionMode,
-          routerAddress,
-          routerInvoiceId,
-          startBlock: startBlock.toString(),
-          expiresAt,
-          metadata: dto.metadata ?? {},
-          transfers: [],
-          sweepStatus: isRouterMode
-            ? PayInSweepStatus.NotRequired
-            : PayInSweepStatus.Pending,
-          sweepTransactionHash: null,
-          sweptAmount: '0',
-          sweptAmountAtomic: '0',
-          sweptAt: null,
-          sweepFailureReason: null,
-          createdAt: now.toISOString(),
-          updatedAt: now.toISOString(),
-          detectedAt: null,
-          confirmedAt: null,
-          acceptedAt: null,
-          acceptanceNote: null,
-        };
-      },
-      preClaimedIndex,
-    );
+      routerAddress,
+      routerInvoiceId,
+      startBlock: startBlock.toString(),
+      expiresAt,
+      metadata: dto.metadata ?? {},
+      transfers: [],
+      sweepStatus: isRouterMode
+        ? PayInSweepStatus.NotRequired
+        : PayInSweepStatus.Pending,
+      sweepTransactionHash: null,
+      sweptAmount: '0',
+      sweptAmountAtomic: '0',
+      sweptAt: null,
+      sweepFailureReason: null,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      detectedAt: null,
+      confirmedAt: null,
+      acceptedAt: null,
+      acceptanceNote: null,
+    });
 
     if (existed) return this.toResponse(record, true);
 
     if (context.idempotencyKey) {
-      this.ledger.storeIdempotencyKey(context.idempotencyKey, record.id);
+      await this.ledger.storeIdempotencyKey(
+        context.clientId,
+        context.idempotencyKey,
+        record.id,
+      );
     }
 
-    this.audit.record({
+    await this.audit.record({
       type: 'PAYIN_CREATED',
       subjectId: record.id,
       actor: this.toAuditActor(context),
@@ -161,19 +157,26 @@ export class PayinsService {
     return this.toResponse(record);
   }
 
-  listPayIns(query: ListPayInsQueryDto): PayInResponse[] {
-    return this.ledger.list(query).map((record) => this.toResponse(record));
+  async listPayIns(
+    query: ListPayInsQueryDto,
+    context: RequestContext,
+  ): Promise<PayInResponse[]> {
+    const records = await this.ledger.list({
+      ...query,
+      clientId: context.clientId ?? undefined,
+    });
+    return Promise.all(records.map((record) => this.toResponse(record)));
   }
 
-  getPayIn(id: string): PayInResponse {
-    return this.toResponse(this.requirePayIn(id));
+  async getPayIn(id: string, context: RequestContext): Promise<PayInResponse> {
+    return this.toResponse(await this.requirePayIn(id, context));
   }
 
   async reconcilePayIn(
     id: string,
     context: RequestContext,
   ): Promise<PayInResponse> {
-    const payin = this.requirePayIn(id);
+    const payin = await this.requirePayIn(id, context);
     if (payin.status === PayInStatus.Confirmed) {
       return this.toResponse(payin, true);
     }
@@ -219,9 +222,10 @@ export class PayinsService {
     }
 
     const isFirstDetection = transfers.length > 0 && !payin.detectedAt;
-    const isNewConfirmation = status === PayInStatus.Confirmed && !payin.confirmedAt;
+    const isNewConfirmation =
+      status === PayInStatus.Confirmed && !payin.confirmedAt;
 
-    const updated = this.ledger.update(id, {
+    const updated = await this.ledger.update(id, {
       status,
       receivedAmountAtomic: totalReceivedAtomic.toString(),
       receivedAmount: formatUnits(totalReceivedAtomic, assetConfig.decimals),
@@ -231,7 +235,7 @@ export class PayinsService {
     });
     if (!updated) throw new ConflictException('Unable to update pay-in.');
 
-    this.audit.record({
+    await this.audit.record({
       type: 'PAYIN_RECONCILED',
       subjectId: id,
       actor: this.toAuditActor(context),
@@ -243,7 +247,7 @@ export class PayinsService {
     });
 
     if (isFirstDetection) {
-      void this.webhook.fire('payin.detected', {
+      void this.webhook.fire(updated.clientId, 'payin.detected', {
         id: updated.id,
         externalId: updated.externalId,
         asset: updated.asset,
@@ -255,7 +259,7 @@ export class PayinsService {
     }
 
     if (isNewConfirmation) {
-      void this.webhook.fire('payin.confirmed', {
+      void this.webhook.fire(updated.clientId, 'payin.confirmed', {
         id: updated.id,
         externalId: updated.externalId,
         asset: updated.asset,
@@ -284,9 +288,9 @@ export class PayinsService {
     dto: SweepPayInDto,
     context: RequestContext,
   ): Promise<PayInResponse> {
-    const payin = this.requirePayIn(id);
+    const payin = await this.requirePayIn(id, context);
     if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
-      const updated = this.ledger.update(id, {
+      const updated = await this.ledger.update(id, {
         sweepStatus: PayInSweepStatus.NotRequired,
         sweepFailureReason: null,
       });
@@ -294,10 +298,10 @@ export class PayinsService {
       return this.toResponse(updated, true);
     }
 
-    if (payin.sweepStatus === PayInSweepStatus.Broadcasted) {
-      return this.toResponse(payin, true);
-    }
-    if (payin.sweepStatus === PayInSweepStatus.Confirmed) {
+    if (
+      payin.sweepStatus === PayInSweepStatus.Broadcasted ||
+      payin.sweepStatus === PayInSweepStatus.Confirmed
+    ) {
       return this.toResponse(payin, true);
     }
 
@@ -317,7 +321,7 @@ export class PayinsService {
         sweep.status === 'confirmed'
           ? PayInSweepStatus.Confirmed
           : PayInSweepStatus.Broadcasted;
-      const updated = this.ledger.update(id, {
+      const updated = await this.ledger.update(id, {
         sweepStatus,
         sweepTransactionHash: sweep.hash,
         sweptAmount: sweep.amount,
@@ -327,7 +331,7 @@ export class PayinsService {
       });
       if (!updated) throw new ConflictException('Unable to update pay-in.');
 
-      this.audit.record({
+      await this.audit.record({
         type: 'PAYIN_SWEPT',
         subjectId: id,
         actor: this.toAuditActor(context),
@@ -345,12 +349,12 @@ export class PayinsService {
     } catch (error) {
       const failureReason =
         error instanceof Error ? error.message : 'Unknown sweep failure.';
-      const failed = this.ledger.update(id, {
+      const failed = await this.ledger.update(id, {
         sweepStatus: PayInSweepStatus.Failed,
         sweepFailureReason: failureReason,
       });
 
-      this.audit.record({
+      await this.audit.record({
         type: 'PAYIN_SWEEP_FAILED',
         subjectId: id,
         actor: this.toAuditActor(context),
@@ -362,12 +366,12 @@ export class PayinsService {
     }
   }
 
-  acceptPayIn(
+  async acceptPayIn(
     id: string,
     dto: AcceptPayInDto,
     context: RequestContext,
-  ): PayInResponse {
-    const payin = this.requirePayIn(id);
+  ): Promise<PayInResponse> {
+    const payin = await this.requirePayIn(id, context);
     if (
       payin.status !== PayInStatus.Underpaid &&
       payin.status !== PayInStatus.Overpaid
@@ -378,7 +382,7 @@ export class PayinsService {
     }
 
     const now = new Date().toISOString();
-    const updated = this.ledger.update(id, {
+    const updated = await this.ledger.update(id, {
       status: PayInStatus.Confirmed,
       acceptedAt: now,
       acceptanceNote: dto.note ?? null,
@@ -386,7 +390,7 @@ export class PayinsService {
     });
     if (!updated) throw new ConflictException('Unable to update pay-in.');
 
-    this.audit.record({
+    await this.audit.record({
       type: 'PAYIN_ACCEPTED',
       subjectId: id,
       actor: this.toAuditActor(context),
@@ -398,7 +402,7 @@ export class PayinsService {
       },
     });
 
-    void this.webhook.fire('payin.confirmed', {
+    void this.webhook.fire(updated.clientId, 'payin.confirmed', {
       id: updated.id,
       externalId: updated.externalId,
       asset: updated.asset,
@@ -416,7 +420,7 @@ export class PayinsService {
     dto: TopUpPayInDto,
     context: RequestContext,
   ): Promise<PayInResponse> {
-    const payin = this.requirePayIn(id);
+    const payin = await this.requirePayIn(id, context);
     if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
       throw new BadRequestException(
         'PaymentRouter pay-ins do not require gas top-up — the payer funds the gas.',
@@ -424,7 +428,7 @@ export class PayinsService {
     }
 
     const amountWei = dto.amountAvax
-      ? parseEther(dto.amountAvax as `${number}`)
+      ? parseEther(dto.amountAvax)
       : parseEther('0.002');
 
     const transfer = await this.blockchain.sendNativeTransfer(
@@ -432,7 +436,7 @@ export class PayinsService {
       amountWei,
     );
 
-    this.audit.record({
+    await this.audit.record({
       type: 'PAYIN_TOPUP',
       subjectId: id,
       actor: this.toAuditActor(context),
@@ -452,7 +456,7 @@ export class PayinsService {
     dto: TopUpAndSweepDto,
     context: RequestContext,
   ): Promise<PayInResponse> {
-    const payin = this.requirePayIn(id);
+    const payin = await this.requirePayIn(id, context);
     if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
       throw new BadRequestException(
         'PaymentRouter pay-ins route directly to treasury — no top-up or sweep needed.',
@@ -460,7 +464,7 @@ export class PayinsService {
     }
 
     const amountWei = dto.amountAvax
-      ? parseEther(dto.amountAvax as `${number}`)
+      ? parseEther(dto.amountAvax)
       : parseEther('0.002');
 
     // Always wait for the top-up to land before attempting the sweep.
@@ -469,7 +473,7 @@ export class PayinsService {
       amountWei,
     );
 
-    this.audit.record({
+    await this.audit.record({
       type: 'PAYIN_TOPUP',
       subjectId: id,
       actor: this.toAuditActor(context),
@@ -521,8 +525,11 @@ export class PayinsService {
     });
   }
 
-  private requirePayIn(id: string): PayInRecord {
-    const payin = this.ledger.findById(id);
+  private async requirePayIn(
+    id: string,
+    context: RequestContext,
+  ): Promise<PayInRecord> {
+    const payin = await this.ledger.findById(id, context.clientId ?? undefined);
     if (!payin) throw new NotFoundException('Pay-in not found.');
     return payin;
   }
@@ -548,14 +555,15 @@ export class PayinsService {
     }
   }
 
-  private toResponse(
+  private async toResponse(
     record: PayInRecord,
     idempotentReplay = false,
-  ): PayInResponse {
+  ): Promise<PayInResponse> {
+    const trail = await this.audit.listBySubject(record.id);
     return {
       ...record,
       idempotentReplay: idempotentReplay || undefined,
-      auditTrail: this.audit.listBySubject(record.id).map((event) => ({
+      auditTrail: trail.map((event) => ({
         type: event.type,
         createdAt: event.createdAt,
         correlationId: event.actor.correlationId,
@@ -565,7 +573,7 @@ export class PayinsService {
 
   private toAuditActor(context: RequestContext): AuditActor {
     return {
-      institutionId: context.institutionId,
+      clientId: context.clientId,
       actor: context.actor,
       correlationId: context.correlationId,
       sourceIp: context.sourceIp,

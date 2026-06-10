@@ -8,11 +8,17 @@ export class StartupValidationService implements OnApplicationBootstrap {
   constructor(private readonly configuration: ConfigurationService) {}
 
   onApplicationBootstrap(): void {
+    if (!this.configuration.databaseConfigured) {
+      throw new Error(
+        'AVASETTLE_DATABASE_URL (or DATABASE_URL) is required — AvaSettle persists all state in PostgreSQL.',
+      );
+    }
+
     const warnings: string[] = [];
 
-    if (!this.configuration.apiKeyConfigured) {
+    if (!this.configuration.adminApiKeyConfigured) {
       warnings.push(
-        'AVASETTLE_API_KEY is not set — all API endpoints are unprotected.',
+        'AVASETTLE_ADMIN_API_KEY is not set — client management endpoints are unusable, so no client can be registered.',
       );
     }
 
@@ -37,21 +43,12 @@ export class StartupValidationService implements OnApplicationBootstrap {
       );
     }
 
-    if (
-      this.configuration.storageDriver === 'postgres' &&
-      !this.configuration.databaseConfigured
-    ) {
-      warnings.push(
-        'AVASETTLE_STORAGE_DRIVER=postgres but no DATABASE_URL or AVASETTLE_DATABASE_URL is set.',
-      );
-    }
-
     for (const warning of warnings) {
       this.logger.warn(warning);
     }
 
     this.logger.log(
-      `AvaSettle started — network: ${this.configuration.settlementNetwork}, storage: ${this.configuration.storageDriver}.`,
+      `AvaSettle started — network: ${this.configuration.settlementNetwork}.`,
     );
   }
 }

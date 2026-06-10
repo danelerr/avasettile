@@ -12,7 +12,8 @@ export enum PayoutStatus {
 }
 
 export type RequestContext = {
-  institutionId: string | null;
+  clientId: string | null;
+  clientName: string | null;
   correlationId: string | null;
   idempotencyKey: string | null;
   actor: string | null;
@@ -21,6 +22,7 @@ export type RequestContext = {
 
 export type PayoutRecord = {
   id: string;
+  clientId: string | null;
   externalId: string;
   chainFlowRequestId: string | null;
   status: PayoutStatus;

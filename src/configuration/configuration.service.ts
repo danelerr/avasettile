@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { resolve } from 'node:path';
 import {
   AssetRuntimeConfig,
   NetworkSummary,
@@ -11,7 +10,7 @@ import {
 @Injectable()
 export class ConfigurationService {
   readonly serviceName = 'AvaSettle On-chain Provider';
-  readonly version = '0.1.0';
+  readonly version = '0.2.0';
 
   get env(): string {
     return process.env.NODE_ENV ?? 'development';
@@ -30,8 +29,8 @@ export class ConfigurationService {
       .filter(Boolean);
   }
 
-  get apiKeyConfigured(): boolean {
-    return this.apiKey.length > 0;
+  get adminApiKeyConfigured(): boolean {
+    return this.adminApiKey.length > 0;
   }
 
   get treasuryConfigured(): boolean {
@@ -102,20 +101,6 @@ export class ConfigurationService {
     return this.readBoolean('AVASETTLE_WAIT_FOR_RECEIPT', false);
   }
 
-  get storageFilePath(): string {
-    return resolve(
-      process.cwd(),
-      process.env.AVASETTLE_STORAGE_FILE ?? 'data/avasettle-ledger.json',
-    );
-  }
-
-  get storageDriver(): 'json' | 'postgres' {
-    const value = process.env.AVASETTLE_STORAGE_DRIVER ?? 'json';
-    if (value === 'json' || value === 'postgres') return value;
-
-    throw new Error('AVASETTLE_STORAGE_DRIVER must be json or postgres.');
-  }
-
   get databaseUrl(): string | null {
     const value =
       process.env.AVASETTLE_DATABASE_URL ?? process.env.DATABASE_URL ?? '';
@@ -128,6 +113,10 @@ export class ConfigurationService {
 
   get databaseSsl(): boolean {
     return this.readBoolean('AVASETTLE_DATABASE_SSL', false);
+  }
+
+  get databaseSslRejectUnauthorized(): boolean {
+    return this.readBoolean('AVASETTLE_DATABASE_SSL_REJECT_UNAUTHORIZED', true);
   }
 
   get databaseMaxConnections(): number {
@@ -179,51 +168,6 @@ export class ConfigurationService {
 
   get paymentRouterConfigured(): boolean {
     return this.paymentRouterAddress !== null;
-  }
-
-  get privacyMode(): 'off' | 'metadata-redaction' | 'eerc-experimental' {
-    const value = process.env.AVASETTLE_PRIVACY_MODE ?? 'off';
-    if (
-      value === 'off' ||
-      value === 'metadata-redaction' ||
-      value === 'eerc-experimental'
-    ) {
-      return value;
-    }
-
-    throw new Error(
-      'AVASETTLE_PRIVACY_MODE must be off, metadata-redaction or eerc-experimental.',
-    );
-  }
-
-  get eercContractAddress(): `0x${string}` | null {
-    return this.readAddress('AVASETTLE_EERC_CONTRACT_ADDRESS');
-  }
-
-  get fiatSettlementCurrency(): string {
-    return (process.env.AVASETTLE_SETTLEMENT_FIAT_CURRENCY ?? 'USD')
-      .trim()
-      .toUpperCase();
-  }
-
-  get fiatSettlementRate(): number {
-    return this.readNumber('AVASETTLE_SETTLEMENT_FIAT_RATE', 1);
-  }
-
-  get riskReviewAmount(): number {
-    return this.readNumber('AVASETTLE_RISK_REVIEW_AMOUNT', 10_000);
-  }
-
-  get riskRejectAmount(): number {
-    return this.readNumber('AVASETTLE_RISK_REJECT_AMOUNT', 50_000);
-  }
-
-  get webhookUrl(): string | null {
-    return process.env.AVASETTLE_WEBHOOK_URL?.trim() || null;
-  }
-
-  get webhookSecret(): string | null {
-    return process.env.AVASETTLE_WEBHOOK_SECRET?.trim() || null;
   }
 
   get webhookRetryAttempts(): number {
@@ -281,8 +225,8 @@ export class ConfigurationService {
     return this.enabledAssets.map((asset) => this.getAssetConfig(asset));
   }
 
-  validateApiKey(candidate: string | undefined): boolean {
-    const expected = this.apiKey;
+  validateAdminApiKey(candidate: string | undefined): boolean {
+    const expected = this.adminApiKey;
     if (!expected || !candidate) return false;
 
     const expectedHash = createHash('sha256').update(expected).digest();
@@ -290,8 +234,8 @@ export class ConfigurationService {
     return timingSafeEqual(expectedHash, candidateHash);
   }
 
-  private get apiKey(): string {
-    return (process.env.AVASETTLE_API_KEY ?? '').trim();
+  private get adminApiKey(): string {
+    return (process.env.AVASETTLE_ADMIN_API_KEY ?? '').trim();
   }
 
   private readAddress(name: string): `0x${string}` | null {
@@ -317,18 +261,6 @@ export class ConfigurationService {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < 0) {
       throw new Error(`${name} must be a non-negative integer.`);
-    }
-
-    return parsed;
-  }
-
-  private readNumber(name: string, fallback: number): number {
-    const value = process.env[name];
-    if (value === undefined || value === '') return fallback;
-
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error(`${name} must be a positive number.`);
     }
 
     return parsed;

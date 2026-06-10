@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
+import { ClientsModule } from '../clients/clients.module';
 import { ConfigurationModule } from '../configuration/configuration.module';
-import { StorageModule } from '../storage/storage.module';
+import { WebhookModule } from '../webhooks/webhook.module';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
 @Module({
-  imports: [ConfigurationModule, StorageModule],
+  imports: [AuditModule, ClientsModule, ConfigurationModule, WebhookModule],
   controllers: [ReportsController],
   providers: [ReportsService],
 })

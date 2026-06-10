@@ -1,15 +1,37 @@
 // Data masking for structured logs: wipe sensitive fields, partially mask card numbers.
 
 const DEFAULT_WIPED_KEYS = new Set([
-  'password', 'accesstoken', 'clave', 'pass', 'certificatepassword',
-  'certificate', 'secret', 'newpassword', 'connection-string', 'access_token',
-  'apikey', 'authorization', 'file', 'databinario', 'base64', 'contract',
+  'password',
+  'accesstoken',
+  'clave',
+  'pass',
+  'certificatepassword',
+  'certificate',
+  'secret',
+  'newpassword',
+  'connection-string',
+  'access_token',
+  'apikey',
+  'authorization',
+  'file',
+  'databinario',
+  'base64',
+  'contract',
   'client_secret',
 ]);
 
 const DEFAULT_PROTECTED_KEYS = new Set([
-  'td', 'nrotarjeta', 'track1', 'track2', 'cvc', 'cvv2', 'numero',
-  'card_number', 'security_code', 'number', 'numerotarjeta',
+  'td',
+  'nrotarjeta',
+  'track1',
+  'track2',
+  'cvc',
+  'cvv2',
+  'numero',
+  'card_number',
+  'security_code',
+  'number',
+  'numerotarjeta',
 ]);
 
 function extraKeys(envVar: string): string[] {
@@ -105,7 +127,8 @@ export function sanitizeQueryString(input: string): string {
   return input.replace(/([^&=]+)=([^&]*)/g, (_, key: string, value: string) => {
     const lk = key.toLowerCase();
     if (wiped.has(lk)) return `${key}=[WIPED]`;
-    if (protected_.has(lk)) return `${key}=${protect(decodeURIComponent(value))}`;
+    if (protected_.has(lk))
+      return `${key}=${protect(decodeURIComponent(value))}`;
     return `${key}=${value}`;
   });
 }

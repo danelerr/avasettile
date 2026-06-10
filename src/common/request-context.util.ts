@@ -1,16 +1,22 @@
+import { AuthenticatedRequest } from '../auth/client-api-key.guard';
 import { RequestContext } from '../payouts/payout.types';
 
+/**
+ * Builds the per-request context from the authenticated request: the client
+ * resolved by ClientApiKeyGuard plus tracing/idempotency headers.
+ */
 export function extractRequestContext(
-  headers: Record<string, string | string[] | undefined>,
-  sourceIp: string,
+  request: AuthenticatedRequest,
   actor?: string | null,
 ): RequestContext {
+  const client = request.avasettleClient ?? null;
   return {
-    institutionId: firstHeader(headers['x-institution-id']),
-    correlationId: firstHeader(headers['x-correlation-id']),
-    idempotencyKey: firstHeader(headers['idempotency-key']),
+    clientId: client?.id ?? null,
+    clientName: client?.name ?? null,
+    correlationId: firstHeader(request.headers['x-correlation-id']),
+    idempotencyKey: firstHeader(request.headers['idempotency-key']),
     actor: actor !== undefined ? actor : null,
-    sourceIp,
+    sourceIp: request.ip ?? null,
   };
 }
 

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { BlockchainService } from '../blockchain/blockchain.service';
+import { ClientsRepository } from '../clients/clients.repository';
 import { ConfigurationService } from '../configuration/configuration.service';
 import { DatabaseService } from '../database/database.service';
 
@@ -7,6 +8,7 @@ import { DatabaseService } from '../database/database.service';
 export class HealthService {
   constructor(
     private readonly blockchain: BlockchainService,
+    private readonly clients: ClientsRepository,
     private readonly configuration: ConfigurationService,
     private readonly database: DatabaseService,
   ) {}
@@ -23,15 +25,24 @@ export class HealthService {
   async getReadiness() {
     const database = await this.database.getReadiness();
     const checks = {
-      apiKeyConfigured: this.configuration.apiKeyConfigured,
+      adminApiKeyConfigured: this.configuration.adminApiKeyConfigured,
       treasuryConfigured: this.configuration.treasuryConfigured,
       payInMnemonicConfigured: Boolean(this.configuration.payInMnemonic),
       assetsConfigured: this.configuration
         .getConfiguredAssets()
         .every((asset) => asset.configured),
-      databaseReady: !database.required || database.reachable,
+      databaseReady: database.reachable,
       rpcReachable: false,
     };
+
+    let registeredClients: number | null = null;
+    if (database.reachable) {
+      try {
+        registeredClients = await this.clients.count();
+      } catch {
+        registeredClients = null;
+      }
+    }
 
     try {
       const chainId = await this.blockchain.getChainId();
@@ -44,12 +55,12 @@ export class HealthService {
     return {
       status: Object.values(checks).every(Boolean) ? 'ready' : 'degraded',
       network: this.configuration.networkSummary,
-      storage: {
-        driver: database.driver,
+      database: {
         configured: database.configured,
-        required: database.required,
+        reachable: database.reachable,
         error: database.error,
       },
+      registeredClients,
       checks,
       timestamp: new Date().toISOString(),
     };
