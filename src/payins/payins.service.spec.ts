@@ -43,6 +43,7 @@ const payin: PayInRecord = {
   routerAddress: null,
   routerInvoiceId: null,
   startBlock: '1',
+  lastScannedBlock: null,
   expiresAt: null,
   metadata: {},
   transfers: [],
@@ -135,6 +136,12 @@ describe('PayinsService', () => {
         sweptAmount: '10',
         sweptAmountAtomic: '10000000',
       }),
+      {
+        expectedSweepStatus: [
+          PayInSweepStatus.Pending,
+          PayInSweepStatus.Failed,
+        ],
+      },
     );
     expect(response.sweepStatus).toBe(PayInSweepStatus.Broadcasted);
   });

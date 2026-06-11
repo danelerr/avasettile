@@ -27,6 +27,7 @@ export enum PayInSweepStatus {
 
 export type PayInTransferRecord = {
   hash: `0x${string}`;
+  logIndex?: string | null;
   from: `0x${string}`;
   to: `0x${string}`;
   amount: string;
@@ -54,6 +55,7 @@ export type PayInRecord = {
   routerAddress: `0x${string}` | null;
   routerInvoiceId: `0x${string}` | null;
   startBlock: string;
+  lastScannedBlock: string | null;
   expiresAt: string | null;
   metadata: Record<string, unknown>;
   transfers: PayInTransferRecord[];

@@ -1,15 +1,42 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { payInToValues, rowToPayIn } from '../database/postgres-mapper';
-import { PayInRecord, PayInStatus } from './payins.types';
+import { buildPatchSet, PatchColumn } from '../database/sql-patch';
+import { PayInRecord, PayInStatus, PayInSweepStatus } from './payins.types';
 
 const PAYIN_COLUMNS = `
   id, client_id, external_id, chain_flow_request_id, status, network, chain_id, asset, token_address,
   collection_mode, deposit_address, derivation_index, router_address, router_invoice_id,
   expected_amount, expected_amount_atomic, received_amount, received_amount_atomic,
   sweep_status, sweep_tx_hash, swept_amount, swept_amount_atomic, swept_at, sweep_failure_reason,
-  start_block, expires_at, accepted_at, acceptance_note,
+  start_block, last_scanned_block, expires_at, accepted_at, acceptance_note,
   metadata, transfers, detected_at, confirmed_at, created_at, updated_at`;
+
+const PATCH_COLUMNS: Record<string, PatchColumn> = {
+  status: { column: 'status' },
+  receivedAmount: { column: 'received_amount' },
+  receivedAmountAtomic: { column: 'received_amount_atomic' },
+  sweepStatus: { column: 'sweep_status' },
+  sweepTransactionHash: { column: 'sweep_tx_hash' },
+  sweptAmount: { column: 'swept_amount' },
+  sweptAmountAtomic: { column: 'swept_amount_atomic' },
+  sweptAt: { column: 'swept_at' },
+  sweepFailureReason: { column: 'sweep_failure_reason' },
+  lastScannedBlock: { column: 'last_scanned_block' },
+  acceptedAt: { column: 'accepted_at' },
+  acceptanceNote: { column: 'acceptance_note' },
+  metadata: { column: 'metadata', json: true },
+  transfers: { column: 'transfers', json: true },
+  detectedAt: { column: 'detected_at' },
+  confirmedAt: { column: 'confirmed_at' },
+};
+
+export type PayInUpdateGuard = {
+  /** Only apply the patch when the row is currently in one of these statuses. */
+  expectedStatus?: PayInStatus[];
+  /** Only apply the patch when the sweep is currently in one of these states. */
+  expectedSweepStatus?: PayInSweepStatus[];
+};
 
 @Injectable()
 export class PayInLedgerService {
@@ -28,7 +55,7 @@ export class PayInLedgerService {
       `INSERT INTO avasettle_payins (${PAYIN_COLUMNS})
        VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-         $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29::jsonb,$30::jsonb,$31,$32,$33,$34
+         $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30::jsonb,$31::jsonb,$32,$33,$34,$35
        )
        ON CONFLICT (client_id, external_id) DO NOTHING
        RETURNING ${PAYIN_COLUMNS}`,
@@ -106,51 +133,62 @@ export class PayInLedgerService {
     return result.rows.map(rowToPayIn);
   }
 
+  /**
+   * Applies the patch in a single UPDATE statement. When a guard is given,
+   * the row is only updated if it is still in the expected state — the
+   * database arbitrates concurrent transitions, so callers can treat a null
+   * result as "another request transitioned this record first".
+   */
   async update(
     id: string,
     patch: Partial<PayInRecord>,
+    guard?: PayInUpdateGuard,
   ): Promise<PayInRecord | null> {
-    const current = await this.findById(id);
-    if (!current) return null;
+    const values: unknown[] = [id];
+    const set = buildPatchSet(patch, PATCH_COLUMNS, values);
 
-    const next: PayInRecord = {
-      ...current,
-      ...patch,
-      id: current.id,
-      clientId: current.clientId,
-      createdAt: current.createdAt,
-      updatedAt: new Date().toISOString(),
-    };
+    let where = 'id = $1';
+    if (guard?.expectedStatus) {
+      values.push(guard.expectedStatus);
+      where += ` AND status = ANY($${values.length})`;
+    }
+    if (guard?.expectedSweepStatus) {
+      values.push(guard.expectedSweepStatus);
+      where += ` AND sweep_status = ANY($${values.length})`;
+    }
 
-    await this.database.query(
-      `UPDATE avasettle_payins SET
-         status = $2, received_amount = $3, received_amount_atomic = $4,
-         sweep_status = $5, sweep_tx_hash = $6, swept_amount = $7, swept_amount_atomic = $8,
-         swept_at = $9, sweep_failure_reason = $10, accepted_at = $11, acceptance_note = $12,
-         metadata = $13::jsonb, transfers = $14::jsonb, detected_at = $15, confirmed_at = $16,
-         updated_at = $17
-       WHERE id = $1`,
+    const result = await this.database.query(
+      `UPDATE avasettle_payins SET ${set} WHERE ${where} RETURNING ${PAYIN_COLUMNS}`,
+      values,
+    );
+    return result.rows[0] ? rowToPayIn(result.rows[0]) : null;
+  }
+
+  /**
+   * Confirmed pay-ins whose funds still sit on the deposit address. The
+   * updated_at threshold spaces retries out: every attempt (success or
+   * failure) touches the row, so a persistently failing sweep is retried at
+   * most once per cool-down window instead of burning gas on every run.
+   */
+  async listSweepRetryCandidates(
+    limit: number,
+    cooldownMinutes: number,
+  ): Promise<PayInRecord[]> {
+    const result = await this.database.query(
+      `SELECT ${PAYIN_COLUMNS} FROM avasettle_payins
+       WHERE status = $1
+         AND sweep_status = ANY($2)
+         AND updated_at < now() - ($3 || ' minutes')::interval
+       ORDER BY confirmed_at ASC NULLS LAST
+       LIMIT $4`,
       [
-        next.id,
-        next.status,
-        next.receivedAmount,
-        next.receivedAmountAtomic,
-        next.sweepStatus,
-        next.sweepTransactionHash,
-        next.sweptAmount,
-        next.sweptAmountAtomic,
-        next.sweptAt,
-        next.sweepFailureReason,
-        next.acceptedAt,
-        next.acceptanceNote,
-        JSON.stringify(next.metadata),
-        JSON.stringify(next.transfers),
-        next.detectedAt,
-        next.confirmedAt,
-        next.updatedAt,
+        PayInStatus.Confirmed,
+        [PayInSweepStatus.Pending, PayInSweepStatus.Failed],
+        cooldownMinutes,
+        limit,
       ],
     );
-    return next;
+    return result.rows.map(rowToPayIn);
   }
 
   async findByIdempotencyKey(

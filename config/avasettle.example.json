@@ -4,23 +4,22 @@
   "rpcUrl": null,
   "explorerBaseUrl": null,
   "corsOrigins": "*",
-
   "database": {
     "ssl": false,
     "sslRejectUnauthorized": true,
     "maxConnections": 5,
     "autoMigrate": true
   },
-
   "payin": {
     "lookbackBlocks": 50000,
     "derivationAccount": 0,
     "defaultExpirationMinutes": null,
     "paymentRouterAddress": null
   },
-
   "assets": {
-    "enabled": ["USDC"],
+    "enabled": [
+      "USDC"
+    ],
     "USDC": {
       "address": null,
       "decimals": 6,
@@ -32,17 +31,16 @@
       "maxPayoutAmount": null
     }
   },
-
   "blockchain": {
     "minConfirmations": 2,
     "waitForReceipt": false
   },
-
   "webhook": {
-    "retryAttempts": 3
+    "retryAttempts": 3,
+    "dispatchIntervalSeconds": 5
   },
-
   "autoReconcileIntervalSeconds": null,
   "autoSweep": false,
-  "throttleRps": 100
+  "throttleRps": 100,
+  "trustProxy": false
 }

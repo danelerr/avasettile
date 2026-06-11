@@ -159,15 +159,18 @@ export class BlockchainService {
     asset: SettlementAsset;
     to: Address;
     fromBlock: bigint;
+    toBlock?: bigint;
   }): Promise<IncomingErc20Transfer[]> {
     const assetConfig = this.requireAsset(input.asset);
-    const latestBlock = await this._publicClient.getBlockNumber();
+    const latestBlock =
+      input.toBlock ?? (await this._publicClient.getBlockNumber());
     const fromBlock =
       input.fromBlock > 0n
         ? input.fromBlock
         : latestBlock > this.configuration.payInLookbackBlocks
           ? latestBlock - this.configuration.payInLookbackBlocks
           : 0n;
+    if (fromBlock > latestBlock) return [];
 
     const transferEvent = parseAbiItem(
       'event Transfer(address indexed from, address indexed to, uint256 value)',
@@ -176,6 +179,7 @@ export class BlockchainService {
     type TransferLog = {
       transactionHash: `0x${string}` | null;
       blockNumber: bigint | null;
+      logIndex: number | null;
       args: { from?: `0x${string}`; to?: `0x${string}`; value?: bigint };
     };
 
@@ -194,6 +198,7 @@ export class BlockchainService {
 
     return logs.map((log) => ({
       hash: log.transactionHash ?? '0x',
+      logIndex: log.logIndex != null ? log.logIndex.toString() : null,
       from: log.args.from ?? '0x',
       to: log.args.to ?? '0x',
       amountAtomic: (log.args.value ?? 0n).toString(),
@@ -206,6 +211,7 @@ export class BlockchainService {
     asset: SettlementAsset;
     invoiceId: `0x${string}`;
     fromBlock: bigint;
+    toBlock?: bigint;
   }): Promise<PaymentRouterInvoicePayment[]> {
     const routerAddress = this.configuration.paymentRouterAddress;
     if (!routerAddress) {
@@ -215,13 +221,15 @@ export class BlockchainService {
     }
 
     const assetConfig = this.requireAsset(input.asset);
-    const latestBlock = await this._publicClient.getBlockNumber();
+    const latestBlock =
+      input.toBlock ?? (await this._publicClient.getBlockNumber());
     const fromBlock =
       input.fromBlock > 0n
         ? input.fromBlock
         : latestBlock > this.configuration.payInLookbackBlocks
           ? latestBlock - this.configuration.payInLookbackBlocks
           : 0n;
+    if (fromBlock > latestBlock) return [];
 
     const invoicePaidEvent = parseAbiItem(
       'event InvoicePaid(bytes32 indexed invoiceId, address indexed payer, address indexed token, uint256 amount, address treasury, bytes metadata)',
@@ -230,6 +238,7 @@ export class BlockchainService {
     type InvoiceLog = {
       transactionHash: `0x${string}` | null;
       blockNumber: bigint | null;
+      logIndex: number | null;
       args: {
         invoiceId?: `0x${string}`;
         payer?: `0x${string}`;
@@ -257,6 +266,7 @@ export class BlockchainService {
 
     return logs.map((log) => ({
       hash: log.transactionHash ?? '0x',
+      logIndex: log.logIndex != null ? log.logIndex.toString() : null,
       invoiceId: log.args.invoiceId ?? '0x',
       payer: log.args.payer ?? '0x',
       from: log.args.payer ?? '0x',

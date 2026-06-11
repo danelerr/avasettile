@@ -7,6 +7,15 @@ import { DatabaseService } from '../database/database.service';
 import { OutboundHttpLogger } from '../observability/outbound-http-logger';
 
 const RETRY_DELAYS_MS = [1_000, 5_000, 30_000];
+const STUCK_DELIVERY_TIMEOUT = '5 minutes';
+
+type OutboxRow = {
+  id: string;
+  client_id: string;
+  event: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+};
 
 @Injectable()
 export class WebhookService {
@@ -20,107 +29,71 @@ export class WebhookService {
   ) {}
 
   /**
-   * Delivers an event to the webhook endpoint configured for the client that
-   * owns the record. Clients without a webhook URL are skipped.
+   * Persists the event in the outbox; the background dispatcher delivers it
+   * with retries. Durable: once this row is written, the event survives
+   * process crashes and is delivered at least once.
+   *
+   * Enqueue failures are logged but never propagated — a webhook must not
+   * fail the business operation that already succeeded.
    */
-  async fire(
+  async enqueue(
     clientId: string | null,
     event: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
     if (!clientId) return;
 
-    let client: ClientRecord | null = null;
-    try {
-      client = await this.clients.findById(clientId);
-    } catch (error) {
-      this.logger.warn(
-        `Could not load client ${clientId} for webhook "${event}": ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
-      return;
-    }
-    const url = client?.webhookUrl;
-    if (!client || !url) return;
-
     const fullPayload: Record<string, unknown> = {
       event,
       timestamp: new Date().toISOString(),
       ...payload,
     };
-    const body = JSON.stringify(fullPayload);
 
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-      'user-agent': 'AvaSettle-Webhook/1.0',
-    };
-
-    if (client.webhookSecret) {
-      const sig = createHmac('sha256', client.webhookSecret)
-        .update(body)
-        .digest('hex');
-      headers['x-avasettle-signature'] = `sha256=${sig}`;
+    try {
+      await this.database.query(
+        `INSERT INTO avasettle_webhook_outbox (client_id, event, payload)
+         VALUES ($1, $2, $3::jsonb)`,
+        [clientId, event, JSON.stringify(fullPayload)],
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to enqueue webhook "${event}" for client ${clientId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
+  }
 
-    const maxAttempts = Math.max(1, this.configuration.webhookRetryAttempts);
-    const delays = RETRY_DELAYS_MS.slice(0, maxAttempts - 1);
-
-    let lastError: string | null = null;
-    let attempts = 0;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (attempt > 1) {
-        await sleep(delays[attempt - 2]);
-      }
-
-      attempts = attempt;
-
-      try {
-        const response = await this.http.fetch(url, {
-          method: 'POST',
-          headers,
-          body,
-        });
-        if (response.ok) {
-          await this.recordDelivery({
-            clientId: client.id,
-            event,
-            url,
-            payload: fullPayload,
-            success: true,
-            attempts,
-            lastError: null,
-            deliveredAt: new Date().toISOString(),
-          });
-          return;
-        }
-
-        lastError = `HTTP ${response.status}`;
-        if (!isRetryableStatus(response.status)) break;
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : 'Network error';
-      }
-
-      if (attempt < maxAttempts) {
-        this.logger.debug(
-          `Webhook attempt ${attempt}/${maxAttempts} failed (${lastError}). Retrying in ${delays[attempt - 1]}ms.`,
-        );
-      }
-    }
-
-    this.logger.warn(
-      `Webhook delivery failed for event "${event}" (client ${client.id}) after ${attempts} attempt(s): ${lastError}`,
+  /**
+   * Claims due outbox rows (FOR UPDATE SKIP LOCKED — safe across multiple
+   * instances) and attempts one delivery per row. Failed attempts are
+   * rescheduled with backoff until the configured attempt limit. Returns the
+   * number of rows processed.
+   */
+  async dispatchDueEvents(batchSize = 10): Promise<number> {
+    // Recover rows stuck in 'delivering' (process died mid-delivery).
+    await this.database.query(
+      `UPDATE avasettle_webhook_outbox
+       SET status = 'pending'
+       WHERE status = 'delivering'
+         AND updated_at < now() - interval '${STUCK_DELIVERY_TIMEOUT}'`,
     );
 
-    await this.recordDelivery({
-      clientId: client.id,
-      event,
-      url,
-      payload: fullPayload,
-      success: false,
-      attempts,
-      lastError,
-      deliveredAt: null,
-    });
+    const claimed = await this.database.query<OutboxRow>(
+      `UPDATE avasettle_webhook_outbox SET status = 'delivering'
+       WHERE id IN (
+         SELECT id FROM avasettle_webhook_outbox
+         WHERE status = 'pending' AND next_attempt_at <= now()
+         ORDER BY next_attempt_at
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       RETURNING id, client_id, event, payload, attempts`,
+      [batchSize],
+    );
+
+    for (const row of claimed.rows) {
+      await this.deliverOnce(row);
+    }
+    return claimed.rows.length;
   }
 
   async listRecentDeliveries(
@@ -173,6 +146,124 @@ export class WebhookService {
     }));
   }
 
+  private async deliverOnce(row: OutboxRow): Promise<void> {
+    let client: ClientRecord | null = null;
+    try {
+      client = await this.clients.findById(row.client_id);
+    } catch (error) {
+      await this.reschedule(
+        row,
+        row.attempts + 1,
+        error instanceof Error ? error.message : 'Failed to load client',
+      );
+      return;
+    }
+
+    const url = client?.webhookUrl;
+    if (!client || client.status !== 'active' || !url) {
+      await this.setStatus(
+        row.id,
+        'skipped',
+        row.attempts,
+        'Client has no active webhook endpoint.',
+      );
+      return;
+    }
+
+    const body = JSON.stringify(row.payload);
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'user-agent': 'AvaSettle-Webhook/1.0',
+    };
+    if (client.webhookSecret) {
+      const sig = createHmac('sha256', client.webhookSecret)
+        .update(body)
+        .digest('hex');
+      headers['x-avasettle-signature'] = `sha256=${sig}`;
+    }
+
+    const attempts = row.attempts + 1;
+    const maxAttempts = Math.max(1, this.configuration.webhookRetryAttempts);
+
+    let lastError: string;
+    let retryable = true;
+    try {
+      const response = await this.http.fetch(url, {
+        method: 'POST',
+        headers,
+        body,
+      });
+      if (response.ok) {
+        await this.setStatus(row.id, 'delivered', attempts, null);
+        await this.recordDelivery({
+          clientId: client.id,
+          event: row.event,
+          url,
+          payload: row.payload,
+          success: true,
+          attempts,
+          lastError: null,
+          deliveredAt: new Date().toISOString(),
+        });
+        return;
+      }
+      lastError = `HTTP ${response.status}`;
+      retryable = isRetryableStatus(response.status);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Network error';
+    }
+
+    if (!retryable || attempts >= maxAttempts) {
+      this.logger.warn(
+        `Webhook delivery failed for event "${row.event}" (client ${client.id}) after ${attempts} attempt(s): ${lastError}`,
+      );
+      await this.setStatus(row.id, 'failed', attempts, lastError);
+      await this.recordDelivery({
+        clientId: client.id,
+        event: row.event,
+        url,
+        payload: row.payload,
+        success: false,
+        attempts,
+        lastError,
+        deliveredAt: null,
+      });
+      return;
+    }
+
+    await this.reschedule(row, attempts, lastError);
+  }
+
+  private async reschedule(
+    row: OutboxRow,
+    attempts: number,
+    lastError: string,
+  ): Promise<void> {
+    const delayMs =
+      RETRY_DELAYS_MS[Math.min(attempts - 1, RETRY_DELAYS_MS.length - 1)];
+    await this.database.query(
+      `UPDATE avasettle_webhook_outbox
+       SET status = 'pending', attempts = $2, last_error = $3,
+           next_attempt_at = now() + ($4 || ' milliseconds')::interval
+       WHERE id = $1`,
+      [row.id, attempts, lastError, delayMs],
+    );
+  }
+
+  private async setStatus(
+    id: string,
+    status: 'delivered' | 'failed' | 'skipped',
+    attempts: number,
+    lastError: string | null,
+  ): Promise<void> {
+    await this.database.query(
+      `UPDATE avasettle_webhook_outbox
+       SET status = $2, attempts = $3, last_error = $4
+       WHERE id = $1`,
+      [id, status, attempts, lastError],
+    );
+  }
+
   private async recordDelivery(delivery: {
     clientId: string;
     event: string;
@@ -205,10 +296,6 @@ export class WebhookService {
       );
     }
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isRetryableStatus(status: number): boolean {

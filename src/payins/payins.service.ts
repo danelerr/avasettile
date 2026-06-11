@@ -110,6 +110,7 @@ export class PayinsService {
       routerAddress,
       routerInvoiceId,
       startBlock: startBlock.toString(),
+      lastScannedBlock: null,
       expiresAt,
       metadata: dto.metadata ?? {},
       transfers: [],
@@ -181,10 +182,12 @@ export class PayinsService {
       return this.toResponse(payin, true);
     }
 
-    const [transfers, latestBlock] = await Promise.all([
-      this.findPayInTransfers(payin),
-      this.blockchain.getLatestBlockNumber(),
-    ]);
+    // Incremental scan: resume from the last scanned block (minus a small
+    // re-scan overlap) instead of re-reading the whole range from startBlock
+    // on every reconciliation run. Overlapping logs are deduplicated below.
+    const latestBlock = await this.blockchain.getLatestBlockNumber();
+    const newTransfers = await this.findPayInTransfers(payin, latestBlock);
+    const transfers = mergeTransfers(payin.transfers, newTransfers);
     const totalReceivedAtomic = transfers.reduce(
       (sum, transfer) => sum + BigInt(transfer.amountAtomic),
       0n,
@@ -230,6 +233,7 @@ export class PayinsService {
       receivedAmountAtomic: totalReceivedAtomic.toString(),
       receivedAmount: formatUnits(totalReceivedAtomic, assetConfig.decimals),
       transfers,
+      lastScannedBlock: latestBlock.toString(),
       detectedAt: isFirstDetection ? now : payin.detectedAt,
       confirmedAt: isNewConfirmation ? now : payin.confirmedAt,
     });
@@ -247,7 +251,7 @@ export class PayinsService {
     });
 
     if (isFirstDetection) {
-      void this.webhook.fire(updated.clientId, 'payin.detected', {
+      await this.webhook.enqueue(updated.clientId, 'payin.detected', {
         id: updated.id,
         externalId: updated.externalId,
         asset: updated.asset,
@@ -259,7 +263,7 @@ export class PayinsService {
     }
 
     if (isNewConfirmation) {
-      void this.webhook.fire(updated.clientId, 'payin.confirmed', {
+      await this.webhook.enqueue(updated.clientId, 'payin.confirmed', {
         id: updated.id,
         externalId: updated.externalId,
         asset: updated.asset,
@@ -321,15 +325,26 @@ export class PayinsService {
         sweep.status === 'confirmed'
           ? PayInSweepStatus.Confirmed
           : PayInSweepStatus.Broadcasted;
-      const updated = await this.ledger.update(id, {
-        sweepStatus,
-        sweepTransactionHash: sweep.hash,
-        sweptAmount: sweep.amount,
-        sweptAmountAtomic: sweep.amountAtomic,
-        sweptAt: new Date().toISOString(),
-        sweepFailureReason: null,
-      });
-      if (!updated) throw new ConflictException('Unable to update pay-in.');
+      // Guarded write: if a concurrent request already recorded its own sweep,
+      // keep that record instead of clobbering it (our duplicate sweep
+      // transaction simply fails on-chain — the address is already empty).
+      const updated = await this.ledger.update(
+        id,
+        {
+          sweepStatus,
+          sweepTransactionHash: sweep.hash,
+          sweptAmount: sweep.amount,
+          sweptAmountAtomic: sweep.amountAtomic,
+          sweptAt: new Date().toISOString(),
+          sweepFailureReason: null,
+        },
+        {
+          expectedSweepStatus: [
+            PayInSweepStatus.Pending,
+            PayInSweepStatus.Failed,
+          ],
+        },
+      );
 
       await this.audit.record({
         type: 'PAYIN_SWEPT',
@@ -345,14 +360,27 @@ export class PayinsService {
         },
       });
 
+      if (!updated) {
+        return this.toResponse(await this.requirePayIn(id, context), true);
+      }
+
       return this.toResponse(updated);
     } catch (error) {
       const failureReason =
         error instanceof Error ? error.message : 'Unknown sweep failure.';
-      const failed = await this.ledger.update(id, {
-        sweepStatus: PayInSweepStatus.Failed,
-        sweepFailureReason: failureReason,
-      });
+      const failed = await this.ledger.update(
+        id,
+        {
+          sweepStatus: PayInSweepStatus.Failed,
+          sweepFailureReason: failureReason,
+        },
+        {
+          expectedSweepStatus: [
+            PayInSweepStatus.Pending,
+            PayInSweepStatus.Failed,
+          ],
+        },
+      );
 
       await this.audit.record({
         type: 'PAYIN_SWEEP_FAILED',
@@ -372,23 +400,30 @@ export class PayinsService {
     context: RequestContext,
   ): Promise<PayInResponse> {
     const payin = await this.requirePayIn(id, context);
-    if (
-      payin.status !== PayInStatus.Underpaid &&
-      payin.status !== PayInStatus.Overpaid
-    ) {
+
+    // Guarded transition: only an underpaid/overpaid pay-in can be accepted,
+    // and concurrent accepts resolve to a single state change.
+    const now = new Date().toISOString();
+    const updated = await this.ledger.update(
+      id,
+      {
+        status: PayInStatus.Confirmed,
+        acceptedAt: now,
+        acceptanceNote: dto.note ?? null,
+        confirmedAt: payin.confirmedAt ?? now,
+      },
+      { expectedStatus: [PayInStatus.Underpaid, PayInStatus.Overpaid] },
+    );
+
+    if (!updated) {
+      const current = await this.requirePayIn(id, context);
+      if (current.status === PayInStatus.Confirmed) {
+        return this.toResponse(current, true);
+      }
       throw new ConflictException(
-        `Pay-in cannot be accepted from status "${payin.status}". Only underpaid or overpaid pay-ins can be manually accepted.`,
+        `Pay-in cannot be accepted from status "${current.status}". Only underpaid or overpaid pay-ins can be manually accepted.`,
       );
     }
-
-    const now = new Date().toISOString();
-    const updated = await this.ledger.update(id, {
-      status: PayInStatus.Confirmed,
-      acceptedAt: now,
-      acceptanceNote: dto.note ?? null,
-      confirmedAt: payin.confirmedAt ?? now,
-    });
-    if (!updated) throw new ConflictException('Unable to update pay-in.');
 
     await this.audit.record({
       type: 'PAYIN_ACCEPTED',
@@ -402,7 +437,7 @@ export class PayinsService {
       },
     });
 
-    void this.webhook.fire(updated.clientId, 'payin.confirmed', {
+    await this.webhook.enqueue(updated.clientId, 'payin.confirmed', {
       id: updated.id,
       externalId: updated.externalId,
       asset: updated.asset,
@@ -492,9 +527,41 @@ export class PayinsService {
     return this.sweepPayIn(id, { notes: dto.notes }, context);
   }
 
+  /**
+   * Retries top-up + sweep for confirmed pay-ins whose funds are still on
+   * the deposit address (sweep pending or failed). Called by the
+   * auto-reconcile loop when autoSweep is enabled. Errors are logged per
+   * pay-in and never abort the batch.
+   */
+  async retryPendingSweeps(
+    limit: number,
+    context: RequestContext,
+  ): Promise<number> {
+    const candidates = await this.ledger.listSweepRetryCandidates(
+      limit,
+      SWEEP_RETRY_COOLDOWN_MINUTES,
+    );
+
+    let attempted = 0;
+    for (const payin of candidates) {
+      attempted++;
+      try {
+        await this.topUpAndSweep(payin.id, {}, context);
+      } catch (error) {
+        this.logger.warn(
+          `Sweep retry failed for pay-in ${payin.id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+      }
+    }
+    return attempted;
+  }
+
   private async findPayInTransfers(
     payin: PayInRecord,
+    toBlock: bigint,
   ): Promise<PayInTransferRecord[]> {
+    const fromBlock = scanFromBlock(payin);
+
     if (payin.collectionMode === PayInCollectionMode.PaymentRouter) {
       if (!payin.routerInvoiceId) {
         throw new BadRequestException('Router pay-in has no invoice id.');
@@ -504,11 +571,13 @@ export class PayinsService {
         .findPaymentRouterInvoicePayments({
           asset: payin.asset,
           invoiceId: payin.routerInvoiceId,
-          fromBlock: BigInt(payin.startBlock),
+          fromBlock,
+          toBlock,
         })
         .then((payments) =>
           payments.map((payment) => ({
             hash: payment.hash,
+            logIndex: payment.logIndex,
             from: payment.from,
             to: payment.to,
             amount: payment.amount,
@@ -521,7 +590,8 @@ export class PayinsService {
     return this.blockchain.findIncomingErc20Transfers({
       asset: payin.asset,
       to: payin.depositAddress,
-      fromBlock: BigInt(payin.startBlock),
+      fromBlock,
+      toBlock,
     });
   }
 
@@ -579,4 +649,40 @@ export class PayinsService {
       sourceIp: context.sourceIp,
     };
   }
+}
+
+// Logs near the tip are re-scanned on the next run in case of a reorg;
+// the dedupe in mergeTransfers makes the overlap harmless.
+const RESCAN_OVERLAP_BLOCKS = 30n;
+
+// Each retry tops up gas, so failures are spaced out instead of burning
+// AVAX on every auto-reconcile tick.
+const SWEEP_RETRY_COOLDOWN_MINUTES = 10;
+
+function scanFromBlock(payin: PayInRecord): bigint {
+  const start = BigInt(payin.startBlock);
+  if (!payin.lastScannedBlock) return start;
+  const resume = BigInt(payin.lastScannedBlock) - RESCAN_OVERLAP_BLOCKS + 1n;
+  return resume > start ? resume : start;
+}
+
+function transferKey(transfer: PayInTransferRecord): string {
+  // logIndex uniquely identifies a log within a transaction; legacy records
+  // without it fall back to a best-effort composite key.
+  return transfer.logIndex != null
+    ? `${transfer.hash}:${transfer.logIndex}`
+    : `${transfer.hash}:${transfer.from}:${transfer.amountAtomic}:${transfer.blockNumber}`;
+}
+
+function mergeTransfers(
+  existing: PayInTransferRecord[],
+  incoming: PayInTransferRecord[],
+): PayInTransferRecord[] {
+  const byKey = new Map<string, PayInTransferRecord>();
+  for (const transfer of [...existing, ...incoming]) {
+    byKey.set(transferKey(transfer), transfer);
+  }
+  return [...byKey.values()].sort((a, b) =>
+    BigInt(a.blockNumber) < BigInt(b.blockNumber) ? -1 : 1,
+  );
 }

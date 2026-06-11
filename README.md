@@ -52,10 +52,30 @@ Clients (per-tenant API keys)          Platform operator (admin key)
 
 ## Quick start
 
+### Option A — Docker Compose (recommended, no local Node/Postgres needed)
+
 ```bash
 cd avasettle
+docker compose up --build
+```
+
+This starts PostgreSQL 16 and the API (migrations run automatically) on
+`http://localhost:3001`. Then verify the stack end to end:
+
+```bash
+API_BASE_URL=http://localhost:3001 AVASETTLE_ADMIN_API_KEY=dev-admin-key-change-me \
+  bash scripts/smoke.sh
+```
+
+To use real Fuji pay-ins/payouts from Docker, put `AVASETTLE_TREASURY_PRIVATE_KEY`
+and `AVASETTLE_PAYIN_MNEMONIC` in a `.env` file next to `docker-compose.yml`.
+
+### Option B — Node locally, Postgres in Docker
+
+```bash
+docker compose up -d postgres
 pnpm install
-cp .env.example .env   # fill in secrets (DATABASE_URL is required)
+cp .env.example .env   # DATABASE_URL=postgres://avasettle:avasettle@localhost:5432/avasettle
 pnpm start:dev
 ```
 
@@ -142,14 +162,7 @@ AVASETTLE_DATABASE_URL=postgresql://... pnpm db:migrate
 
 | Migration | Purpose |
 |---|---|
-| `000_prerequisites.sql` | pgcrypto + `set_updated_at()` trigger function |
-| `001_init_avasettle.sql` | No-op (legacy hackathon schema, dropped in 007) |
-| `002_runtime_state.sql` | No-op (legacy) |
-| `003_normalized_tables.sql` | Pay-ins, payouts, audit events, counters, idempotency |
-| `004_settlement_extended.sql` | Legacy settlement columns (dropped in 007) |
-| `005_drop_runtime_state.sql` | Drops legacy blob table |
-| `006_webhook_deliveries.sql` | Webhook delivery log |
-| `007_clients_multi_tenant.sql` | Clients table, `client_id` scoping, drops unused/mock tables |
+| `001_init.sql` | Full schema: clients (multi-tenant), pay-ins, payouts, audit events, derivation counter, idempotency keys, webhook outbox + delivery log |
 
 ---
 
@@ -208,13 +221,53 @@ const valid = sig === req.headers['x-avasettle-signature'].slice(7);
 | `payin.confirmed` | Pay-in reaches required confirmations (or manually accepted) |
 | `payout.confirmed` | Payout transaction confirmed on-chain |
 
-Failed deliveries are retried with backoff (1s → 5s → 30s). All delivery attempts are logged to `avasettle_webhook_deliveries` and queryable via `GET /v1/reports/webhook-deliveries`.
+Delivery is durable: events are written to a PostgreSQL outbox (`avasettle_webhook_outbox`) in the request path and drained by a background dispatcher (every `webhook.dispatchIntervalSeconds`, default 5s). Failed attempts are retried with backoff (1s → 5s → 30s) and survive process restarts; multiple instances can dispatch concurrently (`FOR UPDATE SKIP LOCKED`). Terminal outcomes are logged to `avasettle_webhook_deliveries` and queryable via `GET /v1/reports/webhook-deliveries`.
 
 ---
 
 ## Auto-sweep
 
 Set `autoSweep: true` in config (or `AVASETTLE_AUTO_SWEEP=true`) to automatically top up and sweep derived-address pay-ins when they confirm. Fires in the background — never blocks reconciliation. PaymentRouter pay-ins are excluded (they settle directly to treasury).
+
+---
+
+## Deployment path: local → Fuji → mainnet
+
+Never deploy straight to mainnet. The promotion path is:
+
+### Stage 1 — Local (Docker Compose)
+
+1. `docker compose up --build`
+2. `bash scripts/smoke.sh` — liveness, readiness, client registration, auth, scoping.
+3. With Fuji secrets in `.env`: run the demo flows (`pnpm demo:payin:create`,
+   `pnpm demo:payin:reconcile`, `pnpm demo:reports`) against `http://localhost:3001`.
+
+### Stage 2 — Fuji testnet (public)
+
+1. Fund a treasury wallet with Fuji AVAX ([faucet](https://core.app/tools/testnet-faucet/)) and test USDC.
+2. Deploy the PaymentRouter to Fuji:
+   ```bash
+   forge script contracts/script/Deploy.s.sol \
+     --rpc-url https://api.avax-test.network/ext/bc/C/rpc --broadcast
+   ```
+   Set `AVASETTLE_PAYMENT_ROUTER_ADDRESS` to the deployed address.
+3. Deploy the API to cloud (Cloud Run section below) with `AVASETTLE_NETWORK=avalanche-fuji`.
+4. Run `scripts/smoke.sh` against the public URL, then exercise a full real
+   pay-in: create → pay USDC from an external wallet → reconcile → sweep → webhook received.
+5. Let auto-reconcile + webhook dispatcher run for a few days; watch
+   `GET /v1/reports/webhook-deliveries` and `GET /v1/reports/sweep-queue` (admin).
+
+### Stage 3 — Mainnet checklist
+
+- [ ] `AVASETTLE_NETWORK=avalanche-mainnet`
+- [ ] `AVASETTLE_USDC_ADDRESS=0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` (mainnet USDC — verify on [Circle's site](https://developers.circle.com/stablecoins/usdc-contract-addresses))
+- [ ] PaymentRouter deployed to mainnet and verified on Snowtrace
+- [ ] Fresh treasury key + fresh mnemonic (never reuse testnet secrets)
+- [ ] `AVASETTLE_MAX_PAYOUT_USDC` set to a conservative per-payout cap
+- [ ] `AVASETTLE_MIN_CONFIRMATIONS` ≥ 2, `AVASETTLE_TRUST_PROXY` set for your LB
+- [ ] `AVASETTLE_DATABASE_SSL=true` against managed Postgres
+- [ ] Treasury funded with only the working-capital AVAX/USDC you can afford on a hot wallet
+- [ ] Alerts on `/health/readiness` and on failed webhook deliveries
 
 ---
 
@@ -260,6 +313,12 @@ Swagger UI (when server is running): `http://localhost:3001/docs`
 - Use `pnpm db:migrate` for production migrations, not `autoMigrate`.
 - Rotate client keys with `POST /v1/admin/clients/:id/rotate-key`; disable a client with `PATCH /v1/admin/clients/:id {"status": "disabled"}`.
 - `GET /health/readiness` reports database reachability, treasury key, mnemonic, token addresses, RPC, and registered client count.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 

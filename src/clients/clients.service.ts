@@ -7,8 +7,17 @@ import { UpdateClientDto } from './dto/update-client.dto';
 
 const API_KEY_PREFIX = 'avk_';
 
+// Per-request key resolution hits this cache before PostgreSQL. Kept short so
+// a disable/rotation propagates to other instances within one TTL.
+const API_KEY_CACHE_TTL_MS = 30_000;
+
 @Injectable()
 export class ClientsService {
+  private readonly apiKeyCache = new Map<
+    string,
+    { client: ClientRecord; expiresAt: number }
+  >();
+
   constructor(private readonly repository: ClientsRepository) {}
 
   async createClient(dto: CreateClientDto): Promise<ClientWithApiKey> {
@@ -48,6 +57,7 @@ export class ClientsService {
       metadata: dto.metadata,
     });
     if (!updated) throw new NotFoundException('Client not found.');
+    this.apiKeyCache.clear();
     return this.toResponse(updated);
   }
 
@@ -60,11 +70,28 @@ export class ClientsService {
       apiKeyPrefix,
     );
     if (!updated) throw new NotFoundException('Client not found.');
+    this.apiKeyCache.clear();
     return { ...this.toResponse(updated), apiKey };
   }
 
-  resolveActiveClientByApiKey(apiKey: string): Promise<ClientRecord | null> {
-    return this.repository.findActiveByApiKeyHash(hashApiKey(apiKey));
+  async resolveActiveClientByApiKey(
+    apiKey: string,
+  ): Promise<ClientRecord | null> {
+    const hash = hashApiKey(apiKey);
+
+    const cached = this.apiKeyCache.get(hash);
+    if (cached && cached.expiresAt > Date.now()) return cached.client;
+
+    const client = await this.repository.findActiveByApiKeyHash(hash);
+    if (client) {
+      this.apiKeyCache.set(hash, {
+        client,
+        expiresAt: Date.now() + API_KEY_CACHE_TTL_MS,
+      });
+    } else {
+      this.apiKeyCache.delete(hash);
+    }
+    return client;
   }
 
   private async requireClient(id: string): Promise<ClientRecord> {

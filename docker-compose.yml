@@ -1,0 +1,54 @@
+# Local stack for AvaSettle: PostgreSQL 16 + the API built from this repo.
+#
+#   docker compose up --build          → full stack on http://localhost:3001
+#   docker compose up -d postgres      → database only (run the API with pnpm)
+#
+# Secrets are read from your shell or a .env file next to this compose file
+# (AVASETTLE_ADMIN_API_KEY, AVASETTLE_TREASURY_PRIVATE_KEY,
+# AVASETTLE_PAYIN_MNEMONIC). Defaults below are for local testing only.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: avasettle
+      POSTGRES_PASSWORD: avasettle
+      POSTGRES_DB: avasettle
+    ports:
+      - '5432:5432'
+    volumes:
+      - avasettle-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U avasettle -d avasettle']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '3001:8080'
+    environment:
+      NODE_ENV: production
+      AVASETTLE_DATABASE_URL: postgres://avasettle:avasettle@postgres:5432/avasettle
+      AVASETTLE_DATABASE_AUTO_MIGRATE: 'true'
+      AVASETTLE_NETWORK: ${AVASETTLE_NETWORK:-avalanche-fuji}
+      # Fuji USDC by default; override for mainnet.
+      AVASETTLE_USDC_ADDRESS: ${AVASETTLE_USDC_ADDRESS:-0x5425890298aed601595a70AB815c96711a31Bc65}
+      AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS: ${AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS:-30}
+      # ── Secrets (set real values in .env — these defaults are dev-only) ──
+      AVASETTLE_ADMIN_API_KEY: ${AVASETTLE_ADMIN_API_KEY:-dev-admin-key-change-me}
+      AVASETTLE_TREASURY_PRIVATE_KEY: ${AVASETTLE_TREASURY_PRIVATE_KEY:-}
+      AVASETTLE_PAYIN_MNEMONIC: ${AVASETTLE_PAYIN_MNEMONIC:-}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:8080/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  avasettle-pgdata:

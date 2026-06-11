@@ -1,7 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { payoutToValues, rowToPayout } from '../database/postgres-mapper';
+import { buildPatchSet, PatchColumn } from '../database/sql-patch';
 import { PayoutRecord, PayoutStatus } from './payout.types';
+
+const PATCH_COLUMNS: Record<string, PatchColumn> = {
+  status: { column: 'status' },
+  treasuryAddress: { column: 'treasury_address' },
+  transactionHash: { column: 'transaction_hash' },
+  failureReason: { column: 'failure_reason' },
+  metadata: { column: 'metadata', json: true },
+  authorizedAt: { column: 'authorized_at' },
+  broadcastedAt: { column: 'broadcasted_at' },
+  confirmedAt: { column: 'confirmed_at' },
+};
 
 const PAYOUT_COLUMNS = `
   id, client_id, external_id, chain_flow_request_id, status, network, chain_id, asset, token_address,
@@ -102,41 +114,30 @@ export class PayoutLedgerService {
     return result.rows.map(rowToPayout);
   }
 
+  /**
+   * Applies the patch in a single UPDATE statement. With `expectedStatus`,
+   * the row is only updated while still in one of those statuses — this is
+   * the database-level guard that makes lifecycle transitions race-safe
+   * (e.g. two concurrent authorizations can never both broadcast).
+   */
   async update(
     id: string,
     patch: Partial<PayoutRecord>,
+    guard?: { expectedStatus?: PayoutStatus[] },
   ): Promise<PayoutRecord | null> {
-    const current = await this.findById(id);
-    if (!current) return null;
+    const values: unknown[] = [id];
+    const set = buildPatchSet(patch, PATCH_COLUMNS, values);
 
-    const next: PayoutRecord = {
-      ...current,
-      ...patch,
-      id: current.id,
-      clientId: current.clientId,
-      createdAt: current.createdAt,
-      updatedAt: new Date().toISOString(),
-    };
+    let where = 'id = $1';
+    if (guard?.expectedStatus) {
+      values.push(guard.expectedStatus);
+      where += ` AND status = ANY($${values.length})`;
+    }
 
-    await this.database.query(
-      `UPDATE avasettle_payouts SET
-         status = $2, treasury_address = $3, transaction_hash = $4, failure_reason = $5,
-         metadata = $6::jsonb, authorized_at = $7, broadcasted_at = $8, confirmed_at = $9,
-         updated_at = $10
-       WHERE id = $1`,
-      [
-        next.id,
-        next.status,
-        next.treasuryAddress,
-        next.transactionHash,
-        next.failureReason,
-        JSON.stringify(next.metadata),
-        next.authorizedAt,
-        next.broadcastedAt,
-        next.confirmedAt,
-        next.updatedAt,
-      ],
+    const result = await this.database.query(
+      `UPDATE avasettle_payouts SET ${set} WHERE ${where} RETURNING ${PAYOUT_COLUMNS}`,
+      values,
     );
-    return next;
+    return result.rows[0] ? rowToPayout(result.rows[0]) : null;
   }
 }

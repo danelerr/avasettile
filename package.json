@@ -1,11 +1,11 @@
 {
   "name": "avasettle",
-  "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "version": "0.2.0",
+  "description": "Multi-tenant B2B stablecoin settlement infrastructure on Avalanche: pay-ins with derived deposit addresses, on-chain reconciliation, treasury sweeps, and ERC-20 payouts.",
+  "author": "Daniel Cueto <danielcuetorrico@gmail.com>",
   "private": true,
   "packageManager": "pnpm@10.28.2",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -31,7 +31,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:integration": "jest --config ./test/jest-integration.json --runInBand"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

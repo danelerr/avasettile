@@ -1,5 +1,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
+import { createHash } from 'node:crypto';
+import { extractApiKey } from '../auth/extract-api-key';
 import { ConfigurationService } from '../configuration/configuration.service';
 
 type WindowEntry = { count: number; resetAt: number };
@@ -20,7 +22,7 @@ export class ThrottleMiddleware implements NestMiddleware {
     const limit = this.configuration.throttleRps;
     if (limit <= 0) return next();
 
-    const key = (req.ip ?? 'unknown').replace(/^::ffff:/, '');
+    const key = this.bucketKey(req);
     const now = Date.now();
 
     let entry = this.windows.get(key);
@@ -42,6 +44,20 @@ export class ThrottleMiddleware implements NestMiddleware {
 
     entry.count++;
     next();
+  }
+
+  /**
+   * Authenticated requests are throttled per API key so tenants behind a
+   * shared load-balancer IP never compete for the same bucket. Anonymous
+   * requests fall back to the source IP (requires trust proxy behind a LB).
+   */
+  private bucketKey(req: Request): string {
+    const apiKey = extractApiKey(req);
+    if (apiKey) {
+      const digest = createHash('sha256').update(apiKey).digest('hex');
+      return `key:${digest.slice(0, 16)}`;
+    }
+    return `ip:${(req.ip ?? 'unknown').replace(/^::ffff:/, '')}`;
   }
 
   private prune(): void {

@@ -153,17 +153,29 @@ export class PayoutsService {
       return this.toResponse(payout, true);
     }
 
-    if (payout.status !== PayoutStatus.Prepared) {
+    // Claim the authorization with a guarded transition: only one of any
+    // concurrent requests can move prepared → authorized, so the ERC-20
+    // transfer below can never be broadcast twice for the same payout.
+    const now = new Date().toISOString();
+    const authorized = await this.ledger.update(
+      id,
+      { status: PayoutStatus.Authorized, authorizedAt: now },
+      { expectedStatus: [PayoutStatus.Prepared] },
+    );
+
+    if (!authorized) {
+      const current = await this.requirePayout(id, context);
+      if (
+        current.status === PayoutStatus.Authorized ||
+        current.status === PayoutStatus.Broadcasted ||
+        current.status === PayoutStatus.Confirmed
+      ) {
+        return this.toResponse(current, true);
+      }
       throw new ConflictException(
-        `Payout cannot be authorized from status ${payout.status}.`,
+        `Payout cannot be authorized from status ${current.status}.`,
       );
     }
-
-    const now = new Date().toISOString();
-    const authorized = (await this.ledger.update(id, {
-      status: PayoutStatus.Authorized,
-      authorizedAt: now,
-    }))!;
 
     await this.audit.record({
       type: 'PAYOUT_AUTHORIZED',
@@ -196,13 +208,17 @@ export class PayoutsService {
         transfer.status === 'confirmed'
           ? PayoutStatus.Confirmed
           : PayoutStatus.Broadcasted;
-      const updated = (await this.ledger.update(id, {
-        status,
-        transactionHash: transfer.hash,
-        broadcastedAt: now,
-        confirmedAt: status === PayoutStatus.Confirmed ? now : null,
-        failureReason: null,
-      }))!;
+      const updated = (await this.ledger.update(
+        id,
+        {
+          status,
+          transactionHash: transfer.hash,
+          broadcastedAt: now,
+          confirmedAt: status === PayoutStatus.Confirmed ? now : null,
+          failureReason: null,
+        },
+        { expectedStatus: [PayoutStatus.Authorized] },
+      ))!;
 
       await this.audit.record({
         type:
@@ -215,7 +231,7 @@ export class PayoutsService {
       });
 
       if (status === PayoutStatus.Confirmed) {
-        void this.webhook.fire(updated.clientId, 'payout.confirmed', {
+        await this.webhook.enqueue(updated.clientId, 'payout.confirmed', {
           id: updated.id,
           externalId: updated.externalId,
           asset: updated.asset,
@@ -229,19 +245,21 @@ export class PayoutsService {
       return this.toResponse(updated);
     } catch (error) {
       if (error instanceof ConflictException) {
-        await this.ledger.update(id, {
-          status: PayoutStatus.Prepared,
-          failureReason: error.message,
-        });
+        await this.ledger.update(
+          id,
+          { status: PayoutStatus.Prepared, failureReason: error.message },
+          { expectedStatus: [PayoutStatus.Authorized] },
+        );
         throw error;
       }
 
       const failureReason =
         error instanceof Error ? error.message : 'Unknown broadcast failure.';
-      const failed = (await this.ledger.update(id, {
-        status: PayoutStatus.Failed,
-        failureReason,
-      }))!;
+      const failed = (await this.ledger.update(
+        id,
+        { status: PayoutStatus.Failed, failureReason },
+        { expectedStatus: [PayoutStatus.Authorized] },
+      ))!;
 
       await this.audit.record({
         type: 'PAYOUT_FAILED',

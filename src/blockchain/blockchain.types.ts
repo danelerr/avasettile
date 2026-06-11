@@ -43,6 +43,7 @@ export type TransactionReconciliation = {
 
 export type IncomingErc20Transfer = {
   hash: Hash;
+  logIndex: string | null;
   from: `0x${string}`;
   to: `0x${string}`;
   amountAtomic: string;

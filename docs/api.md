@@ -800,10 +800,12 @@ All values can be set via env var or `config/avasettle.json`. Env vars take prec
 | `AVASETTLE_MAX_PAYOUT_USDT` | `assets.USDT.maxPayoutAmount` | — | |
 | `AVASETTLE_MIN_CONFIRMATIONS` | `blockchain.minConfirmations` | `2` | Blocks after transfer before `confirmed` |
 | `AVASETTLE_WAIT_FOR_RECEIPT` | `blockchain.waitForReceipt` | `false` | Wait for receipt before returning txHash |
-| `AVASETTLE_WEBHOOK_RETRY_ATTEMPTS` | `webhook.retryAttempts` | `3` | Max retry attempts (delays: 1s, 5s, 30s) |
+| `AVASETTLE_WEBHOOK_RETRY_ATTEMPTS` | `webhook.retryAttempts` | `3` | Max delivery attempts per event (delays: 1s, 5s, 30s) |
+| `AVASETTLE_WEBHOOK_DISPATCH_INTERVAL_SECONDS` | `webhook.dispatchIntervalSeconds` | `5` | Outbox drain interval; `0` disables the dispatcher |
 | `AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS` | `autoReconcileIntervalSeconds` | `null` | Enable auto-reconciliation (min: 10s) |
 | `AVASETTLE_AUTO_SWEEP` | `autoSweep` | `false` | Auto topup+sweep after pay-in confirmation |
-| `AVASETTLE_THROTTLE_RPS` | `throttleRps` | `100` | Rate limit per IP (in-memory) |
+| `AVASETTLE_THROTTLE_RPS` | `throttleRps` | `100` | Rate limit per API key (fallback: per IP), in-memory |
+| `AVASETTLE_TRUST_PROXY` | `trustProxy` | `false` | Express trust-proxy setting (hops, true, or CIDR) for real client IPs behind a LB |
 | `LOGGING_WIPED_KEYS` | — | See defaults | Comma-separated extra keys to wipe from logs |
 | `LOGGING_PROTECTED_KEYS` | — | See defaults | Comma-separated extra keys to partially mask |
 

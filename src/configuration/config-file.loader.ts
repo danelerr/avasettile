@@ -36,10 +36,12 @@ type ConfigFile = {
   };
   webhook?: {
     retryAttempts?: number;
+    dispatchIntervalSeconds?: number;
   };
   autoReconcileIntervalSeconds?: number | null;
   autoSweep?: boolean;
   throttleRps?: number;
+  trustProxy?: boolean | number | string;
 };
 
 function mapToEnvVars(cfg: ConfigFile): Record<string, string> {
@@ -92,6 +94,10 @@ function mapToEnvVars(cfg: ConfigFile): Record<string, string> {
   set('AVASETTLE_WAIT_FOR_RECEIPT', cfg.blockchain?.waitForReceipt);
 
   set('AVASETTLE_WEBHOOK_RETRY_ATTEMPTS', cfg.webhook?.retryAttempts);
+  set(
+    'AVASETTLE_WEBHOOK_DISPATCH_INTERVAL_SECONDS',
+    cfg.webhook?.dispatchIntervalSeconds,
+  );
 
   set(
     'AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS',
@@ -99,6 +105,7 @@ function mapToEnvVars(cfg: ConfigFile): Record<string, string> {
   );
   set('AVASETTLE_AUTO_SWEEP', cfg.autoSweep);
   set('AVASETTLE_THROTTLE_RPS', cfg.throttleRps);
+  set('AVASETTLE_TRUST_PROXY', cfg.trustProxy);
 
   return v;
 }

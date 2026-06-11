@@ -72,3 +72,6 @@ jobs:
 
       - name: Re-apply migrations (idempotency check)
         run: pnpm db:migrate
+
+      - name: Integration tests against PostgreSQL
+        run: pnpm test:integration

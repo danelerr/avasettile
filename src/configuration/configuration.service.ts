@@ -174,6 +174,11 @@ export class ConfigurationService {
     return this.readInt('AVASETTLE_WEBHOOK_RETRY_ATTEMPTS', 3);
   }
 
+  /** Seconds between outbox drain runs. 0 disables the dispatcher. */
+  get webhookDispatchIntervalSeconds(): number {
+    return this.readInt('AVASETTLE_WEBHOOK_DISPATCH_INTERVAL_SECONDS', 5);
+  }
+
   get autoSweep(): boolean {
     return this.readBoolean('AVASETTLE_AUTO_SWEEP', false);
   }
@@ -192,6 +197,25 @@ export class ConfigurationService {
 
   get throttleRps(): number {
     return this.readInt('AVASETTLE_THROTTLE_RPS', 100);
+  }
+
+  /**
+   * Express "trust proxy" setting. Behind a load balancer set this to the
+   * number of proxy hops (e.g. 1) so req.ip resolves to the real client IP
+   * for throttling and audit logs. Accepts true/false, a hop count, or any
+   * Express trust-proxy string ("loopback", CIDRs).
+   */
+  get trustProxy(): boolean | number | string {
+    const value = process.env.AVASETTLE_TRUST_PROXY?.trim();
+    if (!value) return false;
+
+    const lowered = value.toLowerCase();
+    if (['false', '0', 'no', 'off'].includes(lowered)) return false;
+    if (['true', 'yes', 'on'].includes(lowered)) return true;
+
+    const hops = Number(value);
+    if (Number.isInteger(hops) && hops > 0) return hops;
+    return value;
   }
 
   get treasuryPrivateKey(): `0x${string}` | null {

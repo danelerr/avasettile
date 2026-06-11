@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { config as loadEnv } from 'dotenv';
 import { AppModule } from './app.module';
@@ -14,8 +15,16 @@ loadEnv({ path: '.env.local', override: true });
 loadConfigFile();
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   const configuration = app.get(ConfigurationService);
+
+  // Behind a load balancer, resolve req.ip to the real client address.
+  const trustProxy = configuration.trustProxy;
+  if (trustProxy !== false) {
+    app.set('trust proxy', trustProxy);
+  }
 
   app.enableCors({
     origin: configuration.corsOrigins,
