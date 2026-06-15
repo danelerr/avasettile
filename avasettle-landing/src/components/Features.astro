@@ -1,0 +1,132 @@
+---
+const features = [
+  {
+    title: 'Un espacio aislado por cliente',
+    text: 'Cada institución opera con su propia credencial, sus datos completamente separados y sus propias notificaciones. Una sola integración sirve a todos tus clientes.',
+    icon: 'M4 7h16M4 12h16M4 17h10',
+  },
+  {
+    title: 'Conciliación automática',
+    text: 'Cada pago que llega se asocia solo a su invoice, con monto, comprobante y confirmaciones. Nadie de tu equipo vuelve a revisar un explorador de bloques.',
+    icon: 'M4 12a8 8 0 1 1 2.34 5.66M4 12V7m0 5h5',
+  },
+  {
+    title: 'Notificaciones que no se pierden',
+    text: 'Si tu sistema está caído, el aviso espera y se reintenta hasta entregarse. Cada notificación llega firmada criptográficamente y queda registrada.',
+    icon: 'M5 12l4 4L19 6',
+  },
+  {
+    title: 'Auditoría por defecto',
+    text: 'Cada cambio de estado queda registrado y exportable: quién lo originó, cuándo, desde dónde y con qué resultado. Lo que tu auditor pide, ya existe.',
+    icon: 'M7 4h10v16l-2-1.5L13 20l-2-1.5L9 20l-2-1.5V4zM10 9h4m-4 4h4',
+  },
+  {
+    title: 'Tesorería consolidada',
+    text: 'Los fondos cobrados se mueven automáticamente a tu cuenta de tesorería, con reintentos ante fallos y una cola de operación visible para tu equipo.',
+    icon: 'M4 10h16v9H4zM4 10l2-5h12l2 5M12 14v2',
+  },
+  {
+    title: 'Pagos salientes seguros',
+    text: 'Liquidaciones, devoluciones y remesas con controles a nivel de base de datos que garantizan que un pago jamás pueda ejecutarse dos veces.',
+    icon: 'M5 12h13m0 0-5-5m5 5-5 5',
+  },
+];
+---
+
+<section class="section">
+  <div class="container">
+    <p class="eyebrow reveal">Producto</p>
+    <h2 class="section-title reveal">
+      La capa que falta entre la blockchain y tu operación financiera
+    </h2>
+
+    <div class="grid">
+      {
+        features.map((f, i) => (
+          <article class="card reveal" style={`--reveal-delay: ${(i % 3) * 0.08}s`}>
+            <span class="icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d={f.icon} />
+              </svg>
+            </span>
+            <h3>{f.title}</h3>
+            <p>{f.text}</p>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+    margin-top: 52px;
+  }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--glacier);
+    border-radius: var(--radius);
+    padding: 28px;
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease,
+      border-color 0.2s ease;
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: rgb(224 49 46 / 0.3);
+  }
+
+  .icon {
+    display: inline-flex;
+    width: 42px;
+    height: 42px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: rgb(224 49 46 / 0.08);
+    color: var(--settle-red);
+    margin-bottom: 18px;
+  }
+
+  .icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  h3 {
+    font-size: 17px;
+    margin-bottom: 10px;
+  }
+
+  p {
+    font-size: 14.5px;
+    color: var(--slate-600);
+    line-height: 1.6;
+  }
+
+  @media (max-width: 960px) {
+    .grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

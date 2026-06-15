@@ -1,0 +1,73 @@
+<section class="section">
+  <div class="container">
+    <div class="cta-card reveal">
+      <h2>
+        Convierte tu próximo pago en USDC en una operación conciliada
+      </h2>
+      <p>
+        Demo técnica de 45 minutos: creamos un cliente, cobramos USDC real en
+        testnet y ves la conciliación y el webhook en vivo. La demo es el pitch.
+      </p>
+      <div class="ctas">
+        <a
+          class="btn btn-light"
+          href="mailto:danielcuetorrico@gmail.com?subject=Demo%20AvaSettle"
+          >Agendar una demo</a
+        >
+        <a class="btn btn-ghost" href="https://github.com/" rel="noopener" target="_blank"
+          >Explorar el código</a
+        >
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .cta-card {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--settle-red), #b3201d 80%);
+    border-radius: 20px;
+    padding: 64px 56px;
+    color: var(--white);
+    text-align: center;
+  }
+
+  h2 {
+    font-size: clamp(26px, 3.6vw, 38px);
+    font-weight: 700;
+    max-width: 24ch;
+    margin-inline: auto;
+  }
+
+  p {
+    margin: 18px auto 0;
+    max-width: 56ch;
+    font-size: 16.5px;
+    color: rgb(255 255 255 / 0.85);
+  }
+
+  .ctas {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 34px;
+  }
+
+  .btn-ghost {
+    border-color: rgb(255 255 255 / 0.4);
+    color: var(--white);
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--white);
+    transform: translateY(-2px);
+  }
+
+  @media (max-width: 640px) {
+    .cta-card {
+      padding: 48px 28px;
+    }
+  }
+</style>

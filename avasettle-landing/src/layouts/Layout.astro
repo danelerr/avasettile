@@ -1,0 +1,66 @@
+---
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'AvaSettle — Infraestructura de liquidación en stablecoins para LATAM',
+  description = 'API B2B multi-tenant para que fintechs, PSPs y remesadoras reciban, concilien y liquiden pagos en USDC sobre Avalanche. Pay-ins con conciliación on-chain automática, tesorería, webhooks firmados y auditoría completa.',
+} = Astro.props;
+
+import '../styles/global.css';
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="generator" content={Astro.generator} />
+
+    <script is:inline>document.documentElement.classList.add('js');</script>
+    <title>{title}</title>
+    <meta name="description" content={description} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:locale" content="es_ES" />
+    <meta name="twitter:card" content="summary" />
+
+    <!-- Fonts: Hanken Grotesk (display) · Inter (UI) · JetBrains Mono (data) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+  </head>
+  <body>
+    <slot />
+
+    <script>
+      // Scroll-reveal: adds .is-visible once per element when it enters view.
+      const elements = document.querySelectorAll('.reveal');
+      if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+              }
+            }
+          },
+          { threshold: 0.15, rootMargin: '0px 0px -40px 0px' },
+        );
+        elements.forEach((el) => observer.observe(el));
+      } else {
+        elements.forEach((el) => el.classList.add('is-visible'));
+      }
+    </script>
+  </body>
+</html>

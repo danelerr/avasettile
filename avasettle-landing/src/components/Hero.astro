@@ -1,0 +1,270 @@
+<section class="hero">
+  <div class="container hero-grid">
+    <div class="hero-copy reveal">
+      <p class="badge">
+        <span class="badge-dot" aria-hidden="true"></span>
+        Top 5 — Hackathon Institucional LATAM de Avalanche
+      </p>
+
+      <h1>
+        Infraestructura de liquidación en
+        <span class="accent">stablecoins</span> para LATAM
+      </h1>
+
+      <p class="hero-lead">
+        Una wallet recibe dinero. AvaSettle lo convierte en una operación
+        financiera: cobros en USDC conciliados automáticamente contra cada
+        invoice, fondos consolidados en tu tesorería y pagos salientes — todo
+        a través de una sola API sobre Avalanche.
+      </p>
+
+      <div class="hero-ctas">
+        <a
+          class="btn btn-primary"
+          href="mailto:danielcuetorrico@gmail.com?subject=Demo%20AvaSettle"
+          >Agendar una demo</a
+        >
+        <a class="btn btn-secondary" href="#desarrolladores">Ver la API</a>
+      </div>
+
+      <p class="hero-foot mono">
+        Avalanche C-Chain · liquidación en segundos · costos de centavos
+      </p>
+    </div>
+
+    <div class="hero-visual reveal" style="--reveal-delay: 0.15s">
+      <div class="terminal" role="img" aria-label="Ciclo de vida de un pay-in en AvaSettle: creado, detectado on-chain, confirmado y notificado por webhook">
+        <div class="terminal-bar">
+          <span></span><span></span><span></span>
+          <p class="mono">avasettle · pay-in lifecycle</p>
+        </div>
+
+        <div class="terminal-body mono">
+          <p class="line dim">POST /v1/payins <span class="ok">201</span></p>
+          <p class="line">
+            {"{"} "externalId": "invoice-2031", "amount": "150.00", "asset":
+            "USDC" {"}"}
+          </p>
+          <p class="line dim">→ depositAddress <span class="addr">0x8f3C…a41B</span></p>
+
+          <div class="lifecycle" aria-hidden="true">
+            <span class="chip chip-pending">pending</span>
+            <span class="arrow">→</span>
+            <span class="chip chip-detected">detected</span>
+            <span class="arrow">→</span>
+            <span class="chip chip-confirmed">confirmed</span>
+          </div>
+
+          <p class="line webhook">
+            <span class="check">✓</span> webhook
+            <span class="event">payin.confirmed</span> entregado
+            <span class="dim">(HMAC-SHA256)</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    padding-block: 96px 88px;
+    overflow: hidden;
+  }
+
+  .hero-grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 56px;
+    align-items: center;
+  }
+
+  .hero-grid > * {
+    min-width: 0;
+  }
+
+  .badge {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border: 1px solid var(--glacier);
+    background: var(--white);
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--slate-600);
+    margin-bottom: 28px;
+  }
+
+  .badge-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--settle-red);
+  }
+
+  h1 {
+    font-size: clamp(36px, 5.2vw, 56px);
+    font-weight: 800;
+    max-width: 16ch;
+  }
+
+  .accent {
+    color: var(--settle-red);
+  }
+
+  .hero-lead {
+    margin-top: 22px;
+    font-size: 18px;
+    color: var(--slate-600);
+    max-width: 54ch;
+  }
+
+  .hero-ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 32px;
+  }
+
+  .hero-foot {
+    margin-top: 28px;
+    font-size: 12.5px;
+    color: var(--slate-400);
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Terminal card ── */
+
+  .terminal {
+    background: var(--ink);
+    border-radius: var(--radius);
+    border: 1px solid var(--ink-border);
+    box-shadow: 0 24px 60px rgb(15 26 36 / 0.25);
+  }
+
+  .terminal-bar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--ink-border);
+  }
+
+  .terminal-bar span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--ink-border);
+  }
+
+  .terminal-bar p {
+    margin-left: auto;
+    font-size: 11.5px;
+    color: var(--slate-400);
+  }
+
+  .terminal-body {
+    padding: 22px 22px 24px;
+    font-size: 13px;
+    line-height: 1.9;
+    color: #d7e2ec;
+  }
+
+  .line {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dim {
+    color: var(--slate-400);
+  }
+
+  .ok {
+    color: var(--confirm-green);
+  }
+
+  .addr {
+    color: #9cc3e5;
+  }
+
+  .lifecycle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-block: 16px;
+  }
+
+  .arrow {
+    color: var(--slate-400);
+  }
+
+  .chip {
+    padding: 3px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid;
+    opacity: 0.25;
+    animation: chip-on 7s infinite;
+  }
+
+  .chip-pending {
+    color: var(--pending-amber);
+    border-color: var(--pending-amber);
+    animation-delay: 0s;
+  }
+
+  .chip-detected {
+    color: var(--pending-amber);
+    border-color: var(--pending-amber);
+    animation-delay: 1.4s;
+  }
+
+  .chip-confirmed {
+    color: var(--confirm-green);
+    border-color: var(--confirm-green);
+    animation-delay: 2.8s;
+  }
+
+  .webhook {
+    opacity: 0;
+    animation: line-on 7s infinite;
+    animation-delay: 4s;
+  }
+
+  .check {
+    color: var(--confirm-green);
+  }
+
+  .event {
+    color: #9cc3e5;
+  }
+
+  @keyframes chip-on {
+    0%, 8% { opacity: 0.25; }
+    14%, 88% { opacity: 1; }
+    96%, 100% { opacity: 0.25; }
+  }
+
+  @keyframes line-on {
+    0%, 5% { opacity: 0; transform: translateY(4px); }
+    12%, 86% { opacity: 1; transform: none; }
+    95%, 100% { opacity: 0; }
+  }
+
+  @media (max-width: 940px) {
+    .hero-grid {
+      grid-template-columns: 1fr;
+      gap: 44px;
+    }
+
+    .hero {
+      padding-block: 64px;
+    }
+  }
+</style>

@@ -1,0 +1,135 @@
+---
+import { Image } from 'astro:assets';
+import logo from '../assets/avasettle-mark.png';
+---
+
+<footer class="footer">
+  <div class="container">
+    <div class="top">
+      <div class="brand-col">
+        <a href="#" class="brand">
+          <Image src={logo} alt="AvaSettle" width={25} height={32} densities={[1, 2]} />
+          <span>AvaSettle</span>
+        </a>
+        <p>
+          Infraestructura de liquidación en stablecoins para instituciones
+          financieras de LATAM, sobre Avalanche.
+        </p>
+      </div>
+
+      <nav class="col" aria-label="Producto">
+        <h3>Producto</h3>
+        <a href="#producto">Producto</a>
+        <a href="#como-funciona">Cómo funciona</a>
+        <a href="#planes">Planes</a>
+      </nav>
+
+      <nav class="col" aria-label="Recursos">
+        <h3>Recursos</h3>
+        <a href="#desarrolladores">API y sandbox</a>
+        <a href="https://github.com/" rel="noopener" target="_blank">GitHub</a>
+        <a href="https://build.avax.network/" rel="noopener" target="_blank">Avalanche Docs</a>
+      </nav>
+
+      <nav class="col" aria-label="Compañía">
+        <h3>Compañía</h3>
+        <a href="mailto:danielcuetorrico@gmail.com">Contacto</a>
+        <a href="mailto:danielcuetorrico@gmail.com?subject=Demo%20AvaSettle">Agendar demo</a>
+      </nav>
+    </div>
+
+    <div class="bottom mono">
+      <p>© 2026 AvaSettle</p>
+      <p>Top 5 — Hackathon Institucional LATAM de Avalanche</p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    background: var(--ink);
+    color: #aebfce;
+    padding-block: 64px 32px;
+  }
+
+  .top {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 40px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: var(--white);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 18px;
+  }
+
+  .brand-col p {
+    margin-top: 16px;
+    font-size: 14px;
+    max-width: 36ch;
+    line-height: 1.65;
+  }
+
+  .col {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+
+  .col h3 {
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--slate-400);
+    margin-bottom: 6px;
+  }
+
+  .col a {
+    text-decoration: none;
+    font-size: 14.5px;
+    color: #d7e2ec;
+    transition: color 0.15s ease;
+  }
+
+  .col a:hover {
+    color: var(--white);
+  }
+
+  .bottom {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--ink-border);
+    font-size: 12px;
+    color: var(--slate-400);
+  }
+
+  @media (max-width: 820px) {
+    .top {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .top {
+      grid-template-columns: 1fr;
+      gap: 28px;
+    }
+
+    .bottom {
+      flex-direction: column;
+      gap: 6px;
+    }
+  }
+</style>

@@ -1,0 +1,225 @@
+---
+import { Image } from 'astro:assets';
+import logo from '../assets/avasettle-mark.png';
+---
+
+<header class="nav-wrap">
+  <nav class="container nav" aria-label="Principal">
+    <a href="#" class="brand">
+      <Image src={logo} alt="AvaSettle" width={27} height={35} densities={[1, 2, 3]} loading="eager" />
+      <span>AvaSettle</span>
+    </a>
+
+    <div class="links">
+      <a href="#producto">Producto</a>
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#para-quien">Para quién</a>
+      <a href="#planes">Planes</a>
+      <a href="https://github.com/" rel="noopener" target="_blank">GitHub</a>
+    </div>
+
+    <a
+      class="btn btn-primary nav-cta"
+      href="mailto:danielcuetorrico@gmail.com?subject=Demo%20AvaSettle"
+      >Agendar demo</a
+    >
+
+    <button
+      class="hamburger"
+      type="button"
+      aria-label="Abrir menú"
+      aria-expanded="false"
+      aria-controls="mobile-menu"
+    >
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+  </nav>
+
+  <div class="mobile-menu" id="mobile-menu" hidden>
+    <a href="#producto">Producto</a>
+    <a href="#como-funciona">Cómo funciona</a>
+    <a href="#para-quien">Para quién</a>
+    <a href="#planes">Planes</a>
+    <a href="#desarrolladores">Para desarrolladores</a>
+    <a href="https://github.com/" rel="noopener" target="_blank">GitHub</a>
+    <a href="https://build.avax.network/" rel="noopener" target="_blank">Avalanche</a>
+    <a
+      class="btn btn-primary menu-cta"
+      href="mailto:danielcuetorrico@gmail.com?subject=Demo%20AvaSettle"
+      >Agendar demo</a
+    >
+  </div>
+</header>
+
+<script>
+  const button = document.querySelector('.hamburger');
+  const menu = document.getElementById('mobile-menu');
+
+  if (button && menu) {
+    const close = () => {
+      button.setAttribute('aria-expanded', 'false');
+      button.setAttribute('aria-label', 'Abrir menú');
+      menu.hidden = true;
+      document.body.style.removeProperty('overflow');
+    };
+
+    button.addEventListener('click', () => {
+      const open = button.getAttribute('aria-expanded') === 'true';
+      if (open) {
+        close();
+      } else {
+        button.setAttribute('aria-expanded', 'true');
+        button.setAttribute('aria-label', 'Cerrar menú');
+        menu.hidden = false;
+        document.body.style.overflow = 'hidden';
+      }
+    });
+
+    // Navigating from the menu closes it.
+    menu.querySelectorAll('a').forEach((link) => link.addEventListener('click', close));
+
+    // Leaving the mobile breakpoint resets the state.
+    matchMedia('(min-width: 861px)').addEventListener('change', (e) => {
+      if (e.matches) close();
+    });
+  }
+</script>
+
+<style>
+  .nav-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgb(247 250 252 / 0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--glacier);
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    height: 68px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: -0.01em;
+  }
+
+  .links {
+    display: flex;
+    gap: 28px;
+  }
+
+  .links a {
+    text-decoration: none;
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--slate-600);
+    transition: color 0.15s ease;
+  }
+
+  .links a:hover {
+    color: var(--slate-900);
+  }
+
+  .nav-cta {
+    padding: 10px 18px;
+    font-size: 14px;
+  }
+
+  /* ── Hamburger ── */
+
+  .hamburger {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: stretch;
+    gap: 5px;
+    width: 44px;
+    height: 44px;
+    padding: 11px;
+    background: var(--white);
+    border: 1px solid var(--glacier);
+    border-radius: 10px;
+    cursor: pointer;
+  }
+
+  .hamburger span {
+    display: block;
+    height: 2px;
+    background: var(--slate-900);
+    border-radius: 2px;
+    transition:
+      transform 0.22s ease,
+      opacity 0.18s ease;
+  }
+
+  .hamburger[aria-expanded='true'] span:nth-child(1) {
+    transform: translateY(7px) rotate(45deg);
+  }
+
+  .hamburger[aria-expanded='true'] span:nth-child(2) {
+    opacity: 0;
+  }
+
+  .hamburger[aria-expanded='true'] span:nth-child(3) {
+    transform: translateY(-7px) rotate(-45deg);
+  }
+
+  /* ── Mobile menu panel ── */
+
+  .mobile-menu {
+    display: none;
+  }
+
+  @media (max-width: 860px) {
+    .links,
+    .nav-cta {
+      display: none;
+    }
+
+    .hamburger {
+      display: flex;
+    }
+
+    .mobile-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px 24px 24px;
+      border-top: 1px solid var(--glacier);
+      background: var(--snow);
+      max-height: calc(100dvh - 68px);
+      overflow-y: auto;
+    }
+
+    .mobile-menu[hidden] {
+      display: none;
+    }
+
+    .mobile-menu a:not(.menu-cta) {
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--slate-700);
+      padding: 13px 4px;
+      border-bottom: 1px solid var(--glacier);
+    }
+
+    .menu-cta {
+      margin-top: 18px;
+      justify-content: center;
+    }
+  }
+</style>

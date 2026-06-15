@@ -1,0 +1,185 @@
+<section class="section dev" id="desarrolladores">
+  <div class="container dev-grid">
+    <div class="dev-copy reveal">
+      <p class="eyebrow">Para desarrolladores</p>
+      <h2 class="section-title">Integración en días, no en trimestres</h2>
+      <p class="lead">
+        Una API REST con documentación interactiva, un entorno completo de
+        pruebas en la testnet de Avalanche y código abierto que tu equipo
+        puede inspeccionar antes de integrar.
+      </p>
+
+      <ul class="dev-list">
+        <li>Reintentos seguros: la misma operación nunca se ejecuta dos veces</li>
+        <li>Webhooks firmados, con reintentos y registro de cada entrega</li>
+        <li>Trazabilidad de extremo a extremo para tu equipo de auditoría</li>
+        <li>Documentación <span class="mono">OpenAPI</span> y sandbox en testnet desde el día uno</li>
+      </ul>
+
+      <div class="dev-ctas">
+        <a class="btn btn-light" href="https://github.com/" rel="noopener" target="_blank">
+          Ver en GitHub
+        </a>
+        <a class="btn btn-ghost" href="mailto:danielcuetorrico@gmail.com?subject=Sandbox%20AvaSettle">
+          Pedir acceso al sandbox
+        </a>
+      </div>
+    </div>
+
+    <div class="code-card reveal" style="--reveal-delay: 0.12s">
+      <div class="code-tabs mono">
+        <span class="tab active">crear pay-in</span>
+        <span class="tab">webhook</span>
+      </div>
+      <pre class="mono"><code><span class="c"># 1 — Tu backend crea el cobro</span>
+curl -X POST https://api.avasettle.dev/v1/payins \
+  -H <span class="s">"x-avasettle-api-key: avk_…"</span> \
+  -H <span class="s">"idempotency-key: invoice-2031"</span> \
+  -d <span class="s">'&#123;
+    "externalId": "invoice-2031",
+    "asset": "USDC",
+    "amount": "150.00"
+  &#125;'</span>
+
+<span class="c"># 2 — AvaSettle responde con la dirección única</span>
+<span class="k">&#123;</span>
+  <span class="p">"status"</span>: <span class="s">"pending"</span>,
+  <span class="p">"depositAddress"</span>: <span class="s">"0x8f3C…a41B"</span>,
+  <span class="p">"expectedAmount"</span>: <span class="s">"150.00"</span>,
+  <span class="p">"network"</span>: <span class="s">"avalanche-fuji"</span>
+<span class="k">&#125;</span>
+
+<span class="c"># 3 — Cuando el cliente paga, recibes:</span>
+<span class="k">&#123;</span>
+  <span class="p">"event"</span>: <span class="s">"payin.confirmed"</span>,
+  <span class="p">"receivedAmount"</span>: <span class="s">"150.00"</span>,
+  <span class="p">"confirmedAt"</span>: <span class="s">"2026-06-11T14:02:11Z"</span>
+<span class="k">&#125;</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<style>
+  .dev {
+    background: var(--ink);
+    color: var(--snow);
+  }
+
+  .dev :global(.eyebrow) {
+    color: #ff7672;
+  }
+
+  .dev-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+    gap: 56px;
+    align-items: center;
+  }
+
+  .dev-grid > * {
+    min-width: 0;
+  }
+
+  .section-title {
+    color: var(--white);
+  }
+
+  .lead {
+    margin-top: 16px;
+    font-size: 17px;
+    color: #aebfce;
+    max-width: 50ch;
+  }
+
+  .dev-list {
+    margin: 28px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 12px;
+  }
+
+  .dev-list li {
+    position: relative;
+    padding-left: 26px;
+    font-size: 15px;
+    color: #d7e2ec;
+  }
+
+  .dev-list li::before {
+    content: '✓';
+    position: absolute;
+    left: 0;
+    color: var(--confirm-green);
+    font-weight: 700;
+  }
+
+  .dev-list .mono {
+    color: #9cc3e5;
+    font-size: 0.88em;
+  }
+
+  .dev-ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 32px;
+  }
+
+  .btn-ghost {
+    border-color: var(--ink-border);
+    color: var(--snow);
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--slate-400);
+    transform: translateY(-2px);
+  }
+
+  .code-card {
+    background: var(--ink-soft);
+    border: 1px solid var(--ink-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .code-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--ink-border);
+    font-size: 12px;
+  }
+
+  .tab {
+    padding: 5px 12px;
+    border-radius: 6px;
+    color: var(--slate-400);
+  }
+
+  .tab.active {
+    background: var(--ink);
+    color: var(--snow);
+  }
+
+  pre {
+    margin: 0;
+    padding: 22px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.75;
+    color: #d7e2ec;
+  }
+
+  .c { color: var(--slate-400); }
+  .s { color: #f3b8b0; }
+  .p { color: #9cc3e5; }
+  .k { color: var(--slate-400); }
+
+  @media (max-width: 940px) {
+    .dev-grid {
+      grid-template-columns: 1fr;
+      gap: 40px;
+    }
+  }
+</style>

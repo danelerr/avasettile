@@ -1,0 +1,94 @@
+---
+const segments = [
+  {
+    title: 'Remesadoras',
+    pain: 'Corresponsales caros y lentos en cada corredor.',
+    win: 'Rail de dólares digitales con conciliación contable y liquidación en minutos, no días.',
+  },
+  {
+    title: 'PSPs y agregadores',
+    pain: 'Tus comercios piden aceptar USDC y construirlo no justifica el ROI.',
+    win: 'Agrega el rail cripto a tu oferta con una integración — cada comercio es un tenant.',
+  },
+  {
+    title: 'Fintechs',
+    pain: 'Quieres lanzar saldos en dólares digitales sin armar un equipo blockchain.',
+    win: 'Depósitos USDC detectados, conciliados y acreditados contra tu core vía webhooks.',
+  },
+  {
+    title: 'Exportadores y marketplaces',
+    pain: 'Cobros internacionales con SWIFT: caros, lentos, opacos.',
+    win: 'Cobra en USDC con invoice conciliada y liquida a proveedores desde tesorería.',
+  },
+];
+---
+
+<section class="section seg" id="para-quien">
+  <div class="container">
+    <p class="eyebrow reveal">Para quién</p>
+    <h2 class="section-title reveal">
+      Construido para las instituciones financieras de LATAM
+    </h2>
+    <p class="section-lead reveal">
+      Donde las stablecoins ya son refugio de valor, medio de pago y rail de
+      remesas — pero operar con wallets sueltas no es una opción.
+    </p>
+
+    <div class="grid">
+      {
+        segments.map((s, i) => (
+          <article class="card reveal" style={`--reveal-delay: ${(i % 2) * 0.1}s`}>
+            <h3>{s.title}</h3>
+            <p class="pain">{s.pain}</p>
+            <p class="win">{s.win}</p>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .seg {
+    background: var(--white);
+    border-block: 1px solid var(--glacier);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+    margin-top: 52px;
+  }
+
+  .card {
+    border: 1px solid var(--glacier);
+    border-radius: var(--radius);
+    padding: 28px;
+    background: var(--snow);
+  }
+
+  h3 {
+    font-size: 18px;
+    margin-bottom: 12px;
+  }
+
+  .pain {
+    font-size: 14.5px;
+    color: var(--slate-400);
+    text-decoration: line-through;
+    text-decoration-color: rgb(224 49 46 / 0.4);
+    margin-bottom: 8px;
+  }
+
+  .win {
+    font-size: 15px;
+    color: var(--slate-700);
+  }
+
+  @media (max-width: 760px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

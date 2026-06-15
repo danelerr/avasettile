@@ -1,0 +1,232 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   AvaSettle — design tokens & base styles
+   Source of truth: docs/branding.md (repo root)
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Brand palette */
+  --settle-red: #e0312e;
+  --settle-red-dark: #b91c1c;
+  --snow: #f7fafc;
+  --glacier: #dce6ee;
+  --slate-900: #0f1a24;
+  --slate-700: #2b3c4d;
+  --slate-600: #46586a;
+  --slate-400: #8298ac;
+  --confirm-green: #0e9f6e;
+  --pending-amber: #d97706;
+  --white: #ffffff;
+
+  /* Dark-surface tokens (developers / footer sections) */
+  --ink: #0f1a24;
+  --ink-soft: #16242f;
+  --ink-border: #243646;
+
+  /* Typography */
+  --font-display: 'Hanken Grotesk', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Layout */
+  --container: 1120px;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow-card: 0 1px 2px rgb(15 26 36 / 0.04), 0 8px 24px rgb(15 26 36 / 0.06);
+  --shadow-card-hover: 0 2px 4px rgb(15 26 36 / 0.06), 0 16px 40px rgb(15 26 36 / 0.1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 84px;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--slate-900);
+  background: var(--snow);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+/* ── Shared layout helpers ─────────────────────────────────────────────── */
+
+.container {
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+
+.section {
+  padding-block: 96px;
+}
+
+@media (max-width: 720px) {
+  .section {
+    padding-block: 64px;
+  }
+}
+
+.eyebrow {
+  display: inline-block;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--settle-red);
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  max-width: 22ch;
+}
+
+.section-lead {
+  margin-top: 16px;
+  font-size: 18px;
+  color: var(--slate-600);
+  max-width: 58ch;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 24px;
+  border-radius: 10px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.btn-primary {
+  background: var(--settle-red);
+  color: var(--white);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  background: #c52320;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--slate-900);
+  border-color: var(--glacier);
+  background: var(--white);
+}
+
+.btn-secondary:hover {
+  border-color: var(--slate-400);
+  transform: translateY(-2px);
+}
+
+.btn-light {
+  background: var(--white);
+  color: var(--slate-900);
+}
+
+.btn-light:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px rgb(0 0 0 / 0.25);
+}
+
+/* ── Scroll-reveal animation ───────────────────────────────────────────── */
+
+html.js .reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0s);
+}
+
+html.js .reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  html.js .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding-inline: 20px;
+  }
+
+  .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+::selection {
+  background: rgb(224 49 46 / 0.16);
+}

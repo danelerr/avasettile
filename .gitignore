@@ -6,4 +6,3 @@ data
 !.env.example
 cache
 contracts/out
-avasettle-landing

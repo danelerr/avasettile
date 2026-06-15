@@ -1,0 +1,204 @@
+---
+const plans = [
+  {
+    name: 'Pilot',
+    price: 'Gratis',
+    period: '60 días',
+    fee: 'Sin fees de uso',
+    tagline: 'Evalúa con tu equipo técnico, en testnet o mainnet con límites.',
+    items: ['1 cliente', 'USD 10k/mes de volumen', 'Sandbox en Avalanche Fuji', 'Soporte por la comunidad'],
+    cta: 'Empezar piloto',
+    featured: false,
+  },
+  {
+    name: 'Growth',
+    price: 'USD 499',
+    period: '/mes',
+    fee: '+ 0.4% por pay-in confirmado',
+    tagline: 'Para fintechs y PSPs operando en producción.',
+    items: ['3 clientes', 'USD 250k/mes incluidos', 'SLA 99.5% · soporte hábil', 'Webhooks, reportes y auditoría'],
+    cta: 'Hablar con nosotros',
+    featured: true,
+  },
+  {
+    name: 'Scale',
+    price: 'USD 1,990',
+    period: '/mes',
+    fee: '+ 0.25% por pay-in confirmado',
+    tagline: 'Para remesadoras y PSPs con volumen real.',
+    items: ['10 clientes', 'USD 2M/mes incluidos', 'SLA 99.9% · soporte 8×5 directo', 'Onboarding guiado'],
+    cta: 'Hablar con nosotros',
+    featured: false,
+  },
+  {
+    name: 'Enterprise',
+    price: 'A medida',
+    period: '',
+    fee: 'Licencia anual on-premise disponible',
+    tagline: 'Bancos, entidades reguladas y requisitos de residencia de datos.',
+    items: ['Clientes ilimitados', 'En tu propia infraestructura o cloud dedicado', 'SLA 99.95% · soporte 24×7', 'Implementación dedicada y continuidad garantizada'],
+    cta: 'Contactar ventas',
+    featured: false,
+  },
+];
+---
+
+<section class="section" id="planes">
+  <div class="container">
+    <p class="eyebrow reveal">Planes</p>
+    <h2 class="section-title reveal">Solo ganamos cuando tú cobras</h2>
+    <p class="section-lead reveal">
+      Plataforma + fee por pay-in confirmado: nuestro ingreso variable existe
+      únicamente cuando tu operación se concilió con éxito. El porcentaje
+      baja con tu volumen.
+    </p>
+
+    <div class="grid">
+      {
+        plans.map((plan, i) => (
+          <article
+            class:list={['plan', 'reveal', { featured: plan.featured }]}
+            style={`--reveal-delay: ${i * 0.07}s`}
+          >
+            {plan.featured && <span class="flag">Más elegido</span>}
+            <h3>{plan.name}</h3>
+            <p class="price">
+              <span class="amount">{plan.price}</span>
+              <span class="period">{plan.period}</span>
+            </p>
+            <p class="fee mono">{plan.fee}</p>
+            <p class="tagline">{plan.tagline}</p>
+            <ul>
+              {plan.items.map((item) => (
+                <li>{item}</li>
+              ))}
+            </ul>
+            <a
+              class:list={['btn', plan.featured ? 'btn-primary' : 'btn-secondary']}
+              href={`mailto:danielcuetorrico@gmail.com?subject=AvaSettle%20${plan.name}`}
+            >
+              {plan.cta}
+            </a>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin-top: 52px;
+    align-items: stretch;
+  }
+
+  .plan {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--white);
+    border: 1px solid var(--glacier);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+  }
+
+  .plan.featured {
+    border: 2px solid var(--settle-red);
+  }
+
+  .flag {
+    position: absolute;
+    top: -12px;
+    left: 24px;
+    background: var(--settle-red);
+    color: var(--white);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 4px 12px;
+    border-radius: 999px;
+  }
+
+  h3 {
+    font-size: 16px;
+    color: var(--slate-600);
+    font-weight: 600;
+  }
+
+  .price {
+    margin-top: 10px;
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+  }
+
+  .amount {
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .period {
+    color: var(--slate-400);
+    font-size: 14px;
+  }
+
+  .fee {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--settle-red);
+  }
+
+  .tagline {
+    margin-top: 14px;
+    font-size: 13.5px;
+    color: var(--slate-600);
+    min-height: 42px;
+  }
+
+  ul {
+    margin: 18px 0 24px;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 9px;
+    flex: 1;
+  }
+
+  li {
+    position: relative;
+    padding-left: 22px;
+    font-size: 13.5px;
+    color: var(--slate-600);
+  }
+
+  li::before {
+    content: '✓';
+    position: absolute;
+    left: 0;
+    color: var(--confirm-green);
+    font-weight: 700;
+  }
+
+  .btn {
+    justify-content: center;
+    font-size: 14px;
+    padding: 11px 16px;
+  }
+
+  @media (max-width: 1020px) {
+    .grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 620px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

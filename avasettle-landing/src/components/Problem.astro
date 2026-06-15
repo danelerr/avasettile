@@ -1,0 +1,99 @@
+<section class="section" id="producto">
+  <div class="container">
+    <p class="eyebrow reveal">El problema</p>
+    <h2 class="section-title reveal">
+      Aceptar stablecoins es fácil. Institucionalizarlas es difícil.
+    </h2>
+    <p class="section-lead reveal">
+      Publicar una dirección de wallet no resuelve el problema financiero
+      real. Una institución necesita saber quién pagó, contra qué invoice,
+      con cuántas confirmaciones, dónde están los fondos y cómo se reportan.
+    </p>
+
+    <div class="grid">
+      <article class="card reveal" style="--reveal-delay: 0s">
+        <h3>Sin AvaSettle</h3>
+        <ul class="list-bad">
+          <li>Revisar el explorador de bloques a mano para conciliar</li>
+          <li>Fondos dispersos en direcciones sin consolidar</li>
+          <li>6–12 meses construyendo indexación, custodia y webhooks</li>
+          <li>Cero trazabilidad para auditores y reguladores</li>
+        </ul>
+      </article>
+
+      <article class="card card-accent reveal" style="--reveal-delay: 0.12s">
+        <h3>Con AvaSettle</h3>
+        <ul class="list-good">
+          <li>Conciliación on-chain automática contra cada invoice</li>
+          <li>Sweep a tesorería con reintentos y cola de operación</li>
+          <li>Integración por API en días, con sandbox en testnet</li>
+          <li>Evento de auditoría por cada transición de estado</li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 48px;
+  }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--glacier);
+    border-radius: var(--radius);
+    padding: 32px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .card h3 {
+    font-size: 19px;
+    margin-bottom: 18px;
+  }
+
+  .card-accent {
+    border: 2px solid var(--settle-red);
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 12px;
+  }
+
+  li {
+    position: relative;
+    padding-left: 28px;
+    color: var(--slate-600);
+    font-size: 15px;
+  }
+
+  li::before {
+    position: absolute;
+    left: 0;
+    top: 0;
+    font-weight: 700;
+  }
+
+  .list-bad li::before {
+    content: '✕';
+    color: var(--slate-400);
+  }
+
+  .list-good li::before {
+    content: '✓';
+    color: var(--confirm-green);
+  }
+
+  @media (max-width: 820px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
