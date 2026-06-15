@@ -83,15 +83,25 @@ Proporción recomendada en cualquier superficie: 70% neutros (Snow/Slate),
 
 ## 5. Tipografía
 
+Esquema híbrido: voz cálida en display, precisión en datos.
+
 | Rol | Fuente | Fallback |
 |---|---|---|
-| Titulares y UI | **Inter** (600/700) | system-ui, Helvetica |
-| Texto corrido | **Inter** (400/500) | system-ui |
+| Display: titulares, landing, marca, decks | **Hanken Grotesk** (600/700) | Inter, system-ui |
+| UI y texto corrido (producto, docs) | **Inter** (400/500/600) | system-ui, Helvetica |
 | Datos técnicos (hashes, montos, direcciones, código) | **JetBrains Mono** | ui-monospace, Menlo |
 
-Los montos, tx hashes y direcciones EVM se muestran **siempre en
-monoespaciada** con truncado medio (`0x5425…1Bc65`). Es el detalle que hace
-que un dashboard financiero se sienta serio.
+Reglas:
+
+- Hanken Grotesk **solo en tamaños display** (≥24 px). En UI densa y tablas
+  siempre Inter: mejor legibilidad en 12–14 px y soporte OpenType `tnum`
+  (cifras tabulares) verificado.
+- Los montos, tx hashes y direcciones EVM se muestran **siempre en
+  monoespaciada** con truncado medio (`0x5425…1Bc65`) y, en columnas,
+  alineados a la derecha. Es el detalle que hace que un producto financiero
+  se sienta serio.
+- Ambas familias están en Google Fonts (Hanken Grotesk es la versión
+  publicada de HK Grotesk) — sin costo de licencia.
 
 ## 6. Voz y tono
 
