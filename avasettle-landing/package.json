@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "astro": "^6.4.6",
-    "sharp": "^0.35.1"
+    "sharp": "^0.35.1",
+    "viem": "^2.52.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

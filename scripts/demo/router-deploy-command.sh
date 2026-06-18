@@ -22,6 +22,7 @@ forge create src/PaymentRouter.sol:PaymentRouter \\
 
 After deployment:
 1. Set AVASETTLE_PAYMENT_ROUTER_ADDRESS to the deployed address.
-2. Enable Fuji USDC:
-   cast send "\$AVASETTLE_PAYMENT_ROUTER_ADDRESS" "setTokenSupported(address,bool)" "$AVASETTLE_USDC_ADDRESS" true --rpc-url "\$AVASETTLE_RPC_URL" --private-key "\$DEPLOYER_PRIVATE_KEY"
+2. Enable Fuji USDC (signature is setTokenSupported(address,bool,uint256); the
+   third arg is the per-token minimum atomic amount — 1000000 = 1.00 USDC):
+   cast send "\$AVASETTLE_PAYMENT_ROUTER_ADDRESS" "setTokenSupported(address,bool,uint256)" "$AVASETTLE_USDC_ADDRESS" true 1000000 --rpc-url "\$AVASETTLE_RPC_URL" --private-key "\$DEPLOYER_PRIVATE_KEY"
 EOF

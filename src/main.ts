@@ -81,6 +81,10 @@ async function bootstrap() {
     )
     .addTag('reconciliation', 'Semi-automatic on-chain reconciliation jobs.')
     .addTag('reports', 'Operational reporting per client.')
+    .addTag(
+      'checkout',
+      'Public hosted-checkout: PaymentRouter invoices anyone can pay from a browser.',
+    )
     .addApiKey(
       {
         type: 'apiKey',

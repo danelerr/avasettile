@@ -1,0 +1,1283 @@
+{
+  "info": {
+    "_postman_id": "fd5781c2-7a86-4af2-9992-253c27ed85bf",
+    "name": "AvaSettle API",
+    "description": "Colección de prueba para la API de AvaSettle (settlement B2B en USDC sobre Avalanche).\n\nFlujo recomendado (Collection Runner, en orden):\n1. Health → confirma que el servicio responde.\n2. Admin · Clientes → \"Crear cliente\" guarda {{clientApiKey}} y {{clientId}} automáticamente.\n3. Pay-ins / Payouts / Treasury / Reportes → usan esa client key; los create guardan {{payinId}}/{{payoutId}}.\n4. Checkout → endpoints públicos; \"Crear invoice\" guarda {{checkoutSessionId}}.\n\nConfigura {{baseUrl}} y {{adminApiKey}} en el environment \"AvaSettle — Local\" o en las variables de la colección.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health y metadata",
+      "description": "Endpoints públicos de estado. No requieren API key.",
+      "item": [
+        {
+          "name": "Metadata del servicio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": []
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness (DB · RPC · secretos)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/readiness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "readiness"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "Admin · Clientes",
+      "description": "Endpoints de operador de plataforma. Usan {{adminApiKey}}.",
+      "item": [
+        {
+          "name": "Crear cliente → guarda clientApiKey + clientId",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/clients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "clients"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Fintech LATAM SA\",\n  \"webhookUrl\": \"https://api.fintech-latam.example/avasettle/webhooks\",\n  \"metadata\": {\n    \"country\": \"CO\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "La API key en texto plano se devuelve UNA sola vez. El test la guarda en {{clientApiKey}}."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('clientApiKey', j.apiKey);",
+                  "pm.collectionVariables.set('clientId', j.id);",
+                  "pm.test('cliente creado', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('clientId =', j.id, '· apiKey =', j.apiKey);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar clientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/clients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "clients"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener cliente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/clients/{{clientId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "clients",
+                "{{clientId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar / deshabilitar cliente",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/clients/{{clientId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "clients",
+                "{{clientId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Fintech LATAM SA (editado)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Para deshabilitar usa { \"status\": \"disabled\" }."
+          },
+          "response": []
+        },
+        {
+          "name": "Rotar API key → actualiza clientApiKey",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/clients/{{clientId}}/rotate-key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "clients",
+                "{{clientId}}",
+                "rotate-key"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('clientApiKey', j.apiKey);",
+                  "pm.test('key rotada', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "x-avasettle-api-key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{adminApiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pay-ins",
+      "description": "Cobros. Usan la {{clientApiKey}} que generó \"Crear cliente\".",
+      "item": [
+        {
+          "name": "Crear pay-in (derived-address) → guarda payinId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "idempotency-key",
+                "value": "{{$guid}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"payin-{{$timestamp}}\",\n  \"amount\": \"100.00\",\n  \"asset\": \"USDC\",\n  \"metadata\": {\n    \"country\": \"CO\",\n    \"customerReference\": \"merchant-321\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Deriva una dirección EVM única. externalId usa {{$timestamp}} para ser único en cada corrida."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('payinId', j.id);",
+                  "pm.test('pay-in creado', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('payinId =', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pay-in (payment-router) → guarda routerPayinId",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"router-{{$timestamp}}\",\n  \"amount\": \"25.00\",\n  \"asset\": \"USDC\",\n  \"collectionMode\": \"payment-router\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea una invoice on-chain para PaymentRouter.sol. Requiere AVASETTLE_PAYMENT_ROUTER_ADDRESS."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('routerPayinId', j.id);",
+                  "pm.test('router pay-in creado', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('routerPayinId =', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar pay-ins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "disabled": true
+                },
+                {
+                  "key": "externalId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener pay-in",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins/{{payinId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins",
+                "{{payinId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reconciliar on-chain",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins/{{payinId}}/reconcile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins",
+                "{{payinId}}",
+                "reconcile"
+              ]
+            },
+            "description": "Escanea transfers ERC-20 a la dirección derivada y actualiza monto/estado."
+          },
+          "response": []
+        },
+        {
+          "name": "Top-up de gas (AVAX)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins/{{payinId}}/topup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins",
+                "{{payinId}}",
+                "topup"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountAvax\": \"0.002\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Barrer a tesorería (sweep)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins/{{payinId}}/sweep",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins",
+                "{{payinId}}",
+                "sweep"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Sweep del pay-in confirmado a la tesorería institucional.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Top-up + sweep (una operación)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins/{{payinId}}/topup-and-sweep",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins",
+                "{{payinId}}",
+                "topup-and-sweep"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountAvax\": \"0.002\",\n  \"notes\": \"Cierre de lote.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Aceptar under/overpaid",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payins/{{payinId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payins",
+                "{{payinId}}",
+                "accept"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"El cliente confirmó que el monto recibido es aceptable.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "x-avasettle-api-key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{clientApiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Payouts",
+      "description": "Pagos salientes desde la tesorería.",
+      "item": [
+        {
+          "name": "Crear payout → guarda payoutId",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payouts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"payout-{{$timestamp}}\",\n  \"amount\": \"25.50\",\n  \"asset\": \"USDC\",\n  \"beneficiaryAddress\": \"0x1111111111111111111111111111111111111111\",\n  \"beneficiaryName\": \"Cliente LATAM\",\n  \"memo\": \"Liquidación saliente\",\n  \"metadata\": {\n    \"country\": \"BO\",\n    \"fiatRail\": \"bank-transfer\"\n  },\n  \"executeImmediately\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('payoutId', j.id);",
+                  "pm.test('payout creado', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('payoutId =', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar payouts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payouts"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "prepared",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener payout",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payouts/{{payoutId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payouts",
+                "{{payoutId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Autorizar payout (transmite ERC-20)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payouts/{{payoutId}}/authorize",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payouts",
+                "{{payoutId}}",
+                "authorize"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approvedBy\": \"chain-flow\",\n  \"riskDecisionId\": \"risk-ok-0001\",\n  \"notes\": \"Aprobado por el flujo institucional de payouts.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Transición atómica prepared→authorized antes de transmitir. Requiere treasury fondeada."
+          },
+          "response": []
+        },
+        {
+          "name": "Reconciliar payout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/payouts/{{payoutId}}/reconcile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "payouts",
+                "{{payoutId}}",
+                "reconcile"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "x-avasettle-api-key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{clientApiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Treasury",
+      "item": [
+        {
+          "name": "Estado de tesorería",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/treasury/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "treasury",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Balances de tesorería",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/treasury/balances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "treasury",
+                "balances"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "x-avasettle-api-key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{clientApiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Reportes",
+      "item": [
+        {
+          "name": "Resumen operativo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/reports/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "summary"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Entregas de webhook",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/reports/webhook-deliveries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "webhook-deliveries"
+              ],
+              "query": [
+                {
+                  "key": "failed",
+                  "value": "true",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Auditoría",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/reports/audit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "audit"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": true
+                },
+                {
+                  "key": "subjectId",
+                  "value": "{{payinId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cola de sweeps (requiere admin key)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/reports/sweep-queue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "reports",
+                "sweep-queue"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-avasettle-api-key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{adminApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Este endpoint está protegido por la admin key — la request sobreescribe el auth del folder."
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "x-avasettle-api-key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{clientApiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Reconciliación",
+      "item": [
+        {
+          "name": "Correr reconciliación (admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/reconciliation/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "reconciliation",
+                "run"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "x-avasettle-api-key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{adminApiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Checkout (público)",
+      "description": "Hosted checkout. Endpoints públicos (sin API key).",
+      "item": [
+        {
+          "name": "Configuración pública",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/checkout/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout",
+                "config"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Crear invoice → guarda checkoutSessionId",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/checkout/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout",
+                "sessions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"25.00\",\n  \"reference\": \"Pedido #1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Invoice de PaymentRouter pagable desde el navegador. Requiere router configurado."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('checkoutSessionId', j.id);",
+                  "pm.test('invoice creada', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('checkoutSessionId =', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estado de la invoice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/checkout/sessions/{{checkoutSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout",
+                "sessions",
+                "{{checkoutSessionId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reconciliar invoice on-demand",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/checkout/sessions/{{checkoutSessionId}}/reconcile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout",
+                "sessions",
+                "{{checkoutSessionId}}",
+                "reconcile"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "Chain Flow (compat ES)",
+      "description": "Endpoints legacy /api/* consumidos por Chain Flow.",
+      "item": [
+        {
+          "name": "Preparar retiro",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/prepararretiro",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "prepararretiro"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tcTransaccionExterna\": \"EXT-{{$timestamp}}\",\n  \"externalId\": \"cf-retiro-{{$timestamp}}\",\n  \"monto\": \"25.50\",\n  \"moneda\": \"USDC\",\n  \"beneficiaryAddress\": \"0x1111111111111111111111111111111111111111\",\n  \"beneficiario\": \"Cliente LATAM\",\n  \"metadata\": {\n    \"country\": \"BO\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Adapter de compatibilidad con el sistema externo Chain Flow (campos en español)."
+          },
+          "response": []
+        },
+        {
+          "name": "Autorizar retiro",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/autorizarretiro",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "autorizarretiro"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"cf-retiro-0001\",\n  \"payoutId\": \"{{payoutId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar estado retiro (GET)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/consultarestadoretiro?externalId=cf-retiro-0001",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "consultarestadoretiro"
+              ],
+              "query": [
+                {
+                  "key": "externalId",
+                  "value": "cf-retiro-0001",
+                  "disabled": false
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar estado retiro (POST)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/consultarestadoretiro",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "consultarestadoretiro"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"cf-retiro-0001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "x-avasettle-api-key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{clientApiKey}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('sin error de servidor (<500)', () => pm.expect(pm.response.code).to.be.below(500));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "adminApiKey",
+      "value": "dev-admin-key-change-me",
+      "type": "string"
+    },
+    {
+      "key": "clientApiKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "clientId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "payinId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "routerPayinId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "payoutId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "checkoutSessionId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

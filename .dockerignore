@@ -1,6 +1,10 @@
 .git
 node_modules
+**/node_modules
 dist
+**/dist
+# The Astro landing is a separate project; the API image never needs it.
+avasettle-landing
 coverage
 data
 cache

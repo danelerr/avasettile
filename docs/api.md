@@ -13,7 +13,7 @@ AvaSettle is multi-tenant. There are two kinds of keys:
 | **Admin key** (`AVASETTLE_ADMIN_API_KEY`) | Client management (`/v1/admin/clients*`), global reconciliation, sweep queue | `x-avasettle-api-key` |
 | **Client key** (issued per institution) | All business endpoints (`/v1/*`, `/api/*`) — scoped to that client's data | `x-avasettle-api-key` or `Authorization: Bearer` |
 
-Public endpoints (`/`, `/health`, `/health/readiness`) require no key.
+Public endpoints (`/`, `/health`, `/health/readiness`, and the hosted checkout `/checkout/*`) require no key.
 
 **Header options (either works for client keys):**
 
@@ -82,9 +82,17 @@ Public. Returns service metadata.
 ```json
 {
   "service": "AvaSettle On-chain Provider",
-  "version": "0.1.0",
-  "network": "avalanche-fuji",
-  "chainId": 43113
+  "product": "AvaSettle",
+  "role": "avalanche-on-chain-provider",
+  "version": "0.2.0",
+  "network": {
+    "key": "avalanche-fuji",
+    "chainId": 43113,
+    "name": "Avalanche Fuji Testnet",
+    "nativeTokenSymbol": "AVAX",
+    "explorerBaseUrl": "https://subnets-test.avax.network/c-chain",
+    "rpcUrl": "https://api.avax-test.network/ext/bc/C/rpc"
+  }
 }
 ```
 
@@ -103,18 +111,16 @@ Public. Operational readiness check. Returns `degraded` if key configuration is 
 ```json
 {
   "status": "ready",
+  "network": { "key": "avalanche-fuji", "chainId": 43113, "name": "Avalanche Fuji Testnet" },
+  "database": { "configured": true, "reachable": true },
+  "registeredClients": 2,
   "checks": {
-    "apiKeyConfigured": true,
+    "adminApiKeyConfigured": true,
     "treasuryConfigured": true,
-    "mnemonicConfigured": true,
+    "payInMnemonicConfigured": true,
     "assetsConfigured": true,
-    "rpcReachable": true,
-    "databaseReady": true
-  },
-  "storage": {
-    "driver": "postgres",
-    "configured": true,
-    "reachable": true
+    "databaseReady": true,
+    "rpcReachable": true
   }
 }
 ```
@@ -301,6 +307,79 @@ Top-up AVAX + wait for receipt + sweep in a single call. Recommended for operato
   "notes": "Automated sweep"
 }
 ```
+
+---
+
+## Hosted checkout (public)
+
+A public, unauthenticated surface for browser-based payments. Each session is a PaymentRouter pay-in exposed through a **safe projection** — no client identity, no derivation index, no secrets. The session id (an unguessable UUID) is the capability, like a Stripe Checkout session.
+
+These endpoints require **no API key**. Enabled by `AVASETTLE_CHECKOUT_DEMO_ENABLED` (default `true`); session creation requires `AVASETTLE_PAYMENT_ROUTER_ADDRESS` to be set (otherwise `503`).
+
+### `GET /checkout/config`
+
+Public configuration the checkout page needs to build a payment.
+
+```json
+{
+  "network": "avalanche-fuji",
+  "chainId": 43113,
+  "networkName": "Avalanche Fuji Testnet",
+  "explorerBaseUrl": "https://subnets-test.avax.network/c-chain",
+  "demoEnabled": true,
+  "router": { "address": "0xae77c3F3...6386f0", "configured": true },
+  "token": { "symbol": "USDC", "address": "0x5425890298aed601595a70AB815c96711a31Bc65", "decimals": 6 }
+}
+```
+
+### `POST /checkout/sessions`
+
+Create an invoice anyone can pay. Returns the safe public projection.
+
+```json
+{ "amount": "25.00", "asset": "USDC", "reference": "Pedido #1234" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `amount` | string | Yes | Invoice amount in human units. |
+| `asset` | `USDC` \| `USDT` | No | Defaults to the first enabled asset. |
+| `reference` | string | No | Human-readable label shown on the checkout (≤ 140 chars). |
+
+**Response (public projection):**
+
+```json
+{
+  "id": "9d8f9b5a-1e0c-4ef7-8e67-7f8d9c2d8d10",
+  "status": "pending",
+  "asset": "USDC",
+  "amount": "25.00",
+  "amountAtomic": "25000000",
+  "receivedAmount": "0",
+  "network": "avalanche-fuji",
+  "chainId": 43113,
+  "tokenAddress": "0x5425890298aed601595a70AB815c96711a31Bc65",
+  "routerAddress": "0xae77c3F3...6386f0",
+  "invoiceId": "0x7aba3951...55ab6ed2",
+  "reference": "Pedido #1234",
+  "explorerBaseUrl": "https://subnets-test.avax.network/c-chain",
+  "transactions": [],
+  "createdAt": "2026-06-15T02:11:38.626Z",
+  "expiresAt": null,
+  "detectedAt": null,
+  "confirmedAt": null
+}
+```
+
+The payer's wallet approves the router for `amountAtomic`, then calls `PaymentRouter.payInvoice(invoiceId, tokenAddress, amountAtomic, "0x")`.
+
+### `GET /checkout/sessions/:id`
+
+Safe public status of an invoice (same projection). Poll this to track `pending → detected → confirmed`.
+
+### `POST /checkout/sessions/:id/reconcile`
+
+Re-scan the chain for this invoice on demand so the payer sees confirmation without waiting for the background reconcile loop. Returns the updated projection.
 
 ---
 

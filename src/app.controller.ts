@@ -20,7 +20,7 @@ export class AppController {
         service: 'AvaSettle On-chain Provider',
         product: 'AvaSettle',
         role: 'avalanche-on-chain-provider',
-        version: '0.1.0',
+        version: '0.2.0',
         network: {
           key: 'avalanche-fuji',
           chainId: 43113,

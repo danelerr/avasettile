@@ -1,0 +1,456 @@
+---
+import { Image } from 'astro:assets';
+import Layout from '../layouts/Layout.astro';
+import logo from '../assets/avasettle-mark.png';
+---
+
+<Layout
+  title="Pagar con AvaSettle"
+  description="Paga una invoice en USDC sobre Avalanche y mira la conciliación en vivo de AvaSettle."
+>
+  <main class="pay">
+    <header class="pay-head">
+      <a class="brand" href="/">
+        <Image src={logo} alt="AvaSettle" width={24} height={31} densities={[1, 2, 3]} loading="eager" />
+        <span>AvaSettle</span>
+      </a>
+      <span class="secure mono">Pago seguro · Avalanche</span>
+    </header>
+
+    <div class="card-wrap">
+      <!-- Fallback state: API unreachable, router not deployed, invoice not found -->
+      <div class="card state" id="unavailable" hidden>
+        <p class="state-icon" aria-hidden="true">‼</p>
+        <p class="state-text" id="unavailable-text">Cargando…</p>
+        <a class="btn btn-secondary" href="/">Volver al inicio</a>
+      </div>
+
+      <!-- Create-invoice form (no ?session in the URL) -->
+      <div class="card" id="create-panel" hidden>
+        <p class="eyebrow">Checkout de demostración</p>
+        <h1 class="card-title">Crea una invoice de cobro</h1>
+        <p class="card-lead">
+          Genera una invoice on-chain y págala con tu wallet para ver la
+          conciliación en vivo de AvaSettle.
+        </p>
+        <form id="create-form" class="form" novalidate>
+          <label class="field">
+            <span>Monto (<span id="create-asset">USDC</span>)</span>
+            <input
+              id="amount-input"
+              type="text"
+              inputmode="decimal"
+              placeholder="25.00"
+              value="25.00"
+              autocomplete="off"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>Referencia <em>(opcional)</em></span>
+            <input
+              id="reference-input"
+              type="text"
+              maxlength="140"
+              placeholder="Pedido #1234"
+              autocomplete="off"
+            />
+          </label>
+          <button id="create-submit" class="btn btn-primary" type="submit">
+            Crear invoice
+          </button>
+          <p id="create-error" class="form-error" role="alert"></p>
+        </form>
+      </div>
+
+      <!-- Payment card (?session=<id>) -->
+      <div class="card pay-card" id="pay-panel" hidden>
+        <div class="pay-top">
+          <p class="eyebrow">Pagar invoice</p>
+          <span class="net-badge mono" id="net-badge">—</span>
+        </div>
+
+        <p class="amount mono" id="amount-display">—</p>
+        <p class="reference" id="reference-row" hidden>
+          <span class="reference-tag">Ref</span>
+          <span id="reference-display"></span>
+        </p>
+
+        <div class="meta">
+          <div class="meta-row">
+            <span class="meta-label">Invoice</span>
+            <span class="mono" id="invoice-id">—</span>
+          </div>
+          <div class="meta-row" id="tx-row" hidden>
+            <span class="meta-label">Pago</span>
+            <a class="mono link" id="tx-link" href="#" target="_blank" rel="noopener">—</a>
+          </div>
+        </div>
+
+        <div class="steps" aria-label="Estado del pago">
+          <span class="step" data-step="created" data-state="on">Creada</span>
+          <span class="sep" aria-hidden="true"></span>
+          <span class="step" data-step="paid" data-state="off">Pagada</span>
+          <span class="sep" aria-hidden="true"></span>
+          <span class="step" data-step="detected" data-state="off">Detectada</span>
+          <span class="sep" aria-hidden="true"></span>
+          <span class="step" data-step="confirmed" data-state="off">Confirmada</span>
+        </div>
+
+        <span class="status-pill mono" id="status-pill" data-status="pending">
+          Esperando pago
+        </span>
+
+        <button class="btn btn-primary action" id="action-btn" type="button">
+          Conectar wallet
+        </button>
+        <p class="action-note" id="action-note" data-kind="info" role="status"></p>
+      </div>
+    </div>
+
+    <p class="pay-foot">
+      Liquidado por <a href="/">AvaSettle</a> sobre Avalanche · cobros en USDC
+      conciliados on-chain
+    </p>
+  </main>
+
+  <script>
+    import '../scripts/checkout.ts';
+  </script>
+</Layout>
+
+<style>
+  .pay {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 20px 48px;
+    background:
+      radial-gradient(120% 60% at 50% 0%, #eef3f7 0%, var(--snow) 60%);
+  }
+
+  .pay-head {
+    width: 100%;
+    max-width: 460px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 32px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--slate-900);
+  }
+
+  .secure {
+    font-size: 12px;
+    color: var(--slate-400);
+  }
+
+  .card-wrap {
+    width: 100%;
+    max-width: 460px;
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .card {
+    width: 100%;
+    background: var(--white);
+    border: 1px solid var(--glacier);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
+    padding: 32px;
+  }
+
+  .card-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 6px;
+  }
+
+  .card-lead {
+    margin-top: 12px;
+    color: var(--slate-600);
+    font-size: 15px;
+  }
+
+  /* ── Create form ── */
+
+  .form {
+    margin-top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--slate-700);
+  }
+
+  .field em {
+    font-style: normal;
+    font-weight: 400;
+    color: var(--slate-400);
+  }
+
+  .field input {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--glacier);
+    border-radius: var(--radius-sm);
+    color: var(--slate-900);
+    background: var(--snow);
+    transition: border-color 0.15s ease;
+  }
+
+  .field input:focus {
+    outline: none;
+    border-color: var(--settle-red);
+  }
+
+  .form .btn {
+    margin-top: 4px;
+    justify-content: center;
+  }
+
+  .form-error {
+    color: var(--settle-red);
+    font-size: 13px;
+    min-height: 1em;
+  }
+
+  /* ── Payment card ── */
+
+  .pay-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .pay-top .eyebrow {
+    margin-bottom: 0;
+  }
+
+  .net-badge {
+    font-size: 11.5px;
+    color: var(--slate-600);
+    padding: 4px 10px;
+    border: 1px solid var(--glacier);
+    border-radius: 999px;
+  }
+
+  .amount {
+    font-size: 40px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin-top: 18px;
+    color: var(--slate-900);
+  }
+
+  .reference {
+    margin-top: 8px;
+    font-size: 14px;
+    color: var(--slate-600);
+  }
+
+  .reference-tag {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--slate-400);
+    margin-right: 6px;
+  }
+
+  .meta {
+    margin-top: 22px;
+    border-top: 1px solid var(--glacier);
+    border-bottom: 1px solid var(--glacier);
+    padding-block: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+  }
+
+  .meta-label {
+    color: var(--slate-400);
+  }
+
+  .meta-row .mono {
+    color: var(--slate-700);
+    font-size: 13px;
+  }
+
+  .link {
+    color: var(--settle-red);
+    text-decoration: none;
+  }
+
+  .link:hover {
+    text-decoration: underline;
+  }
+
+  /* ── Status steps ── */
+
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 24px;
+  }
+
+  .step {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--glacier);
+    color: var(--slate-400);
+    white-space: nowrap;
+    transition:
+      color 0.25s ease,
+      border-color 0.25s ease,
+      background-color 0.25s ease;
+  }
+
+  .step[data-step='confirmed'][data-state='on'] {
+    color: var(--confirm-green);
+    border-color: var(--confirm-green);
+    background: rgb(14 159 110 / 0.08);
+  }
+
+  .step[data-step='created'][data-state='on'],
+  .step[data-step='paid'][data-state='on'],
+  .step[data-step='detected'][data-state='on'] {
+    color: var(--pending-amber);
+    border-color: var(--pending-amber);
+    background: rgb(217 119 6 / 0.08);
+  }
+
+  .sep {
+    flex: 1;
+    height: 1px;
+    background: var(--glacier);
+  }
+
+  .status-pill {
+    display: inline-block;
+    margin-top: 20px;
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--glacier);
+    color: var(--slate-600);
+  }
+
+  .status-pill[data-status='detected'] {
+    color: var(--pending-amber);
+    border-color: var(--pending-amber);
+  }
+
+  .status-pill[data-status='confirmed'] {
+    color: var(--confirm-green);
+    border-color: var(--confirm-green);
+  }
+
+  .status-pill[data-status='expired'],
+  .status-pill[data-status='underpaid'],
+  .status-pill[data-status='overpaid'] {
+    color: var(--settle-red);
+    border-color: var(--settle-red);
+  }
+
+  .action {
+    width: 100%;
+    justify-content: center;
+    margin-top: 24px;
+  }
+
+  .action-note {
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 1.5em;
+    color: var(--slate-600);
+  }
+
+  .action-note[data-kind='error'] {
+    color: var(--settle-red);
+  }
+
+  /* ── Fallback state card ── */
+
+  .state {
+    text-align: center;
+  }
+
+  .state-icon {
+    font-size: 28px;
+    color: var(--settle-red);
+  }
+
+  .state-text {
+    margin-top: 12px;
+    margin-bottom: 24px;
+    color: var(--slate-700);
+  }
+
+  .state .btn {
+    justify-content: center;
+  }
+
+  .pay-foot {
+    margin-top: 32px;
+    font-size: 12.5px;
+    color: var(--slate-400);
+    text-align: center;
+  }
+
+  .pay-foot a {
+    color: var(--slate-600);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  @media (max-width: 480px) {
+    .card {
+      padding: 24px;
+    }
+
+    .amount {
+      font-size: 34px;
+    }
+
+    .steps {
+      gap: 5px;
+    }
+
+    .step {
+      padding: 4px 8px;
+      font-size: 10.5px;
+    }
+  }
+</style>

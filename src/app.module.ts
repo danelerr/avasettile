@@ -18,6 +18,7 @@ import { HealthModule } from './health/health.module';
 import { PayoutsModule } from './payouts/payouts.module';
 import { TreasuryModule } from './treasury/treasury.module';
 import { ChainFlowModule } from './chain-flow/chain-flow.module';
+import { CheckoutModule } from './checkout/checkout.module';
 import { PayinsModule } from './payins/payins.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { ReportsModule } from './reports/reports.module';
@@ -39,6 +40,7 @@ import { WebhookModule } from './webhooks/webhook.module';
     TreasuryModule,
     ChainFlowModule,
     PayinsModule,
+    CheckoutModule,
     ReconciliationModule,
     ReportsModule,
     StartupModule,

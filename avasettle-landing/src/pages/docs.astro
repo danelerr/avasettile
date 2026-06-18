@@ -1,0 +1,159 @@
+---
+import { Image } from 'astro:assets';
+import Layout from '../layouts/Layout.astro';
+import logo from '../assets/avasettle-mark.png';
+---
+
+<Layout
+  title="Referencia de la API — AvaSettle"
+  description="Documentación de la API de AvaSettle: pay-ins con conciliación on-chain, payouts, tesorería, checkout y webhooks firmados sobre Avalanche."
+>
+  <header class="topbar" id="topbar">
+    <a class="brand" href="/">
+      <Image src={logo} alt="AvaSettle" width={24} height={31} densities={[1, 2, 3]} loading="eager" />
+      <span>AvaSettle</span>
+      <span class="brand-sep">·</span>
+      <span class="brand-tag">Referencia de la API</span>
+    </a>
+    <nav class="topbar-links">
+      <a href="/openapi.json" download>OpenAPI</a>
+      <a href="/">← Inicio</a>
+    </nav>
+  </header>
+
+  <div id="redoc-container">
+    <noscript>
+      <p style="padding:32px;font-family:var(--font-body)">
+        La referencia interactiva necesita JavaScript. El spec OpenAPI está en
+        <a href="/openapi.json">/openapi.json</a>.
+      </p>
+    </noscript>
+  </div>
+
+  <script is:inline src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+  <script is:inline>
+    Redoc.init(
+      '/openapi.json',
+      {
+        scrollYOffset: '#topbar',
+        hideDownloadButton: false,
+        expandResponses: '200,201',
+        jsonSampleExpandLevel: 2,
+        requiredPropsFirst: true,
+        sortPropsAlphabetically: false,
+        nativeScrollbars: true,
+        theme: {
+          colors: {
+            primary: { main: '#e0312e' },
+            success: { main: '#0e9f6e' },
+            warning: { main: '#d97706' },
+            error: { main: '#b91c1c' },
+            text: { primary: '#0f1a24', secondary: '#46586a' },
+            http: {
+              get: '#0e9f6e',
+              post: '#2b3c4d',
+              put: '#d97706',
+              patch: '#d97706',
+              delete: '#e0312e',
+            },
+          },
+          typography: {
+            fontSize: '15px',
+            lineHeight: '1.6',
+            fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+            headings: {
+              fontFamily: "'Hanken Grotesk', 'Inter', sans-serif",
+              fontWeight: '700',
+            },
+            code: {
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontSize: '13px',
+              color: '#b91c1c',
+              backgroundColor: 'rgba(224,49,46,0.06)',
+            },
+            links: { color: '#e0312e' },
+          },
+          sidebar: {
+            width: '280px',
+            backgroundColor: '#0f1a24',
+            textColor: '#d7e2ec',
+            activeTextColor: '#ffffff',
+          },
+          rightPanel: {
+            backgroundColor: '#16242f',
+            textColor: '#d7e2ec',
+            width: '40%',
+          },
+        },
+      },
+      document.getElementById('redoc-container'),
+    );
+  </script>
+</Layout>
+
+<style>
+  body {
+    background: var(--white);
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+    padding-inline: 24px;
+    background: rgb(247 250 252 / 0.94);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--glacier);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    text-decoration: none;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 17px;
+    color: var(--slate-900);
+  }
+
+  .brand-sep {
+    color: var(--slate-400);
+    font-weight: 400;
+  }
+
+  .brand-tag {
+    font-family: var(--font-body);
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--slate-600);
+  }
+
+  .topbar-links {
+    display: flex;
+    gap: 22px;
+  }
+
+  .topbar-links a {
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--slate-600);
+    transition: color 0.15s ease;
+  }
+
+  .topbar-links a:hover {
+    color: var(--settle-red);
+  }
+
+  @media (max-width: 560px) {
+    .brand-sep,
+    .brand-tag {
+      display: none;
+    }
+  }
+</style>

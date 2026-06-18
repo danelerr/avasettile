@@ -170,6 +170,11 @@ export class ConfigurationService {
     return this.paymentRouterAddress !== null;
   }
 
+  /** Enables the public hosted-checkout endpoints. Disable in locked-down prod. */
+  get checkoutDemoEnabled(): boolean {
+    return this.readBoolean('AVASETTLE_CHECKOUT_DEMO_ENABLED', true);
+  }
+
   get webhookRetryAttempts(): number {
     return this.readInt('AVASETTLE_WEBHOOK_RETRY_ATTEMPTS', 3);
   }
