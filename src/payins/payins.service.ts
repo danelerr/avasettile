@@ -570,7 +570,8 @@ export class PayinsService {
       return this.blockchain
         .findPaymentRouterInvoicePayments({
           asset: payin.asset,
-          invoiceId: payin.routerInvoiceId,
+          invoiceRef: payin.routerInvoiceId,
+          amountAtomic: BigInt(payin.expectedAmountAtomic),
           fromBlock,
           toBlock,
         })

@@ -1,21 +1,29 @@
 [profile.default]
-src     = "src"
-out     = "out"
-libs    = []
-test    = "test"
-script  = "script"
-
+src           = "src"
+out           = "out"
+test          = "test"
+script        = "script"
+libs          = ["lib"]
+solc_version  = "0.8.28"
+# Avalanche C-Chain reached Cancun EVM equivalence (MCOPY, transient storage)
+# with the Durango upgrade (2024); pinned explicitly so the verified bytecode is
+# reproducible across solc minor bumps.
+evm_version   = "cancun"
+optimizer     = true
+optimizer_runs = 200
+fuzz          = { runs = 512 }
 remappings = [
-  "@openzeppelin/contracts/=../node_modules/@openzeppelin/contracts/"
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "forge-std/=lib/forge-std/src/",
 ]
 
-solc_version = "0.8.20"
+# Fork tests (PaymentRouterFork.t.sol) are opt-in via RUN_FORK_TESTS=1 — they
+# hit the live Fuji C-Chain. The main `forge test` run stays hermetic.
 
-[profile.fuji]
-rpc_endpoints = { avalanche_fuji = "${AVALANCHE_FUJI_RPC_URL}" }
-
-[profile.mainnet]
-rpc_endpoints = { avalanche = "${AVALANCHE_MAINNET_RPC_URL}" }
+# RPC endpoints + verification keys are read from the environment.
+[rpc_endpoints]
+avalanche_fuji = "${AVALANCHE_FUJI_RPC_URL}"
+avalanche      = "${AVALANCHE_MAINNET_RPC_URL}"
 
 [etherscan]
 avalanche_fuji = { key = "${SNOWTRACE_API_KEY}", url = "https://api-testnet.snowtrace.io/api" }

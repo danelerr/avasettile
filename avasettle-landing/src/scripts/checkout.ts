@@ -21,13 +21,15 @@ const routerAbi = [
     type: 'function',
     name: 'payInvoice',
     stateMutability: 'nonpayable',
+    // The contract derives invoiceId = keccak256(invoiceRef, token, amount).
+    // session.invoiceId carries the invoiceRef salt (keccak256 of the external id).
     inputs: [
-      { name: 'invoiceId', type: 'bytes32' },
+      { name: 'invoiceRef', type: 'bytes32' },
       { name: 'token', type: 'address' },
       { name: 'amount', type: 'uint256' },
       { name: 'metadata', type: 'bytes' },
     ],
-    outputs: [],
+    outputs: [{ name: 'invoiceId', type: 'bytes32' }],
   },
 ] as const;
 

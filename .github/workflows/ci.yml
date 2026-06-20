@@ -36,6 +36,36 @@ jobs:
       - name: Build
         run: pnpm build
 
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Set up contract libs (forge-std + OpenZeppelin)
+        run: pnpm contracts:setup
+
+      - name: Format check
+        run: pnpm contracts:fmt:check
+
+      - name: Build contracts
+        run: pnpm contracts:build
+
+      - name: Contract tests
+        run: pnpm contracts:test
+
   migrations:
     runs-on: ubuntu-latest
     services:

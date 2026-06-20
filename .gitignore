@@ -5,4 +5,9 @@ data
 .env.*
 !.env.example
 cache
+
+# Foundry — artifacts and vendored libs (regenerated via `pnpm contracts:setup`)
 contracts/out
+contracts/cache
+contracts/lib
+broadcast

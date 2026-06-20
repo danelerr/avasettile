@@ -62,7 +62,7 @@ repo) — léelo para el "por qué" y la narrativa. Stack y módulos abajo.
 - **Persistencia:** **PostgreSQL directo vía `pg`**, sin ORM, sin estado en
   memoria. Postgres es **obligatorio** — la app lanza error al arrancar sin
   `DATABASE_URL`.
-- **Smart contract:** `contracts/src/PaymentRouter.sol` (Solidity ^0.8.20,
+- **Smart contract:** `contracts/src/PaymentRouter.sol` (Solidity 0.8.28,
   OpenZeppelin, Foundry). Listo, **no deployado todavía**.
 - **Auth:** dos tipos de API key (ver §4).
 - **Puerto:** 3001 local (Docker expone 8080 internamente → 3001 afuera).

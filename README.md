@@ -18,7 +18,7 @@ Multi-tenant B2B stablecoin payments infrastructure for PSPs, fintechs, and remi
 | Webhook delivery log | Ready |
 | Auto-sweep after confirmation | Ready (opt-in via `autoSweep`) |
 | CI (typecheck, lint, tests, build, migration check) | Ready |
-| PaymentRouter smart contract | Scripts ready — not deployed yet |
+| PaymentRouter smart contract | **Deployed + verified on C-Chain mainnet** — [`0x91Bf4c06…149c2`](https://snowtrace.io/address/0x91Bf4c06D2A588980450Bb6AEDc43f1923f149c2) |
 | Treasury key management | Hot wallet — **not production-safe for high value** |
 | Rate limiting | In-memory per instance — move to Redis for multi-instance |
 
@@ -180,28 +180,43 @@ Everything else under `/v1/*` and `/api/*` requires a client key and only sees t
 
 ## Smart contracts
 
-`PaymentRouter.sol` is an optional Avalanche-native invoice rail. Deploy with Foundry:
+Avalanche-native contracts under `contracts/` (Foundry). They are self-contained:
+`pnpm contracts:setup` vendors the libs (forge-std + OpenZeppelin 5.x from
+`node_modules`), then `pnpm contracts:build` / `pnpm contracts:test` work.
+CI runs format-check + build + the full test suite (70 tests).
+
+| Contract | Purpose |
+|---|---|
+| `PaymentRouter.sol` | Programmable invoice rail — payer settles a USDC invoice straight to treasury in one tx |
+| `SettlementVault.sol` | On-chain payout rail — operators pay beneficiaries from the treasury, single or atomic batch |
+| `PrivateSettlementRegistry.sol` | Experimental eERC roadmap step — settlement commitments (confidential amount/counterparty) with selective auditor verification |
 
 ```bash
-cd avasettle
-# Fuji
-forge script contracts/script/Deploy.s.sol \
-  --rpc-url https://api.avax-test.network/ext/bc/C/rpc \
-  --broadcast --verify
+pnpm contracts:setup            # one-time: vendor forge-std + OpenZeppelin
+pnpm contracts:test             # forge test (70 tests)
 
-# Mainnet
-forge script contracts/script/Deploy.s.sol \
-  --rpc-url https://api.avax.network/ext/bc/C/rpc \
-  --broadcast --verify
+# Deploy (Fuji shown; use --rpc-url avalanche for mainnet). Signing uses a
+# Foundry keystore (--account/--sender); TREASURY|FUNDER and optional OWNER
+# (multisig) come from the env. Use --private-key instead of --account if preferred.
+TREASURY=… forge script contracts/script/Deploy.s.sol \
+  --rpc-url avalanche_fuji --account <keystore> --sender <addr> --broadcast --verify
+FUNDER=… OPERATOR=… forge script contracts/script/DeploySettlementVault.s.sol \
+  --rpc-url avalanche_fuji --account <keystore> --sender <addr> --broadcast --verify
+REGISTRAR=… forge script contracts/script/DeployPrivateSettlementRegistry.s.sol \
+  --rpc-url avalanche_fuji --account <keystore> --sender <addr> --broadcast --verify
 ```
 
-After deployment, set `AVASETTLE_PAYMENT_ROUTER_ADDRESS` to the deployed address.
+After deployment set `AVASETTLE_PAYMENT_ROUTER_ADDRESS` (and, when used,
+`AVASETTLE_SETTLEMENT_VAULT_ADDRESS`, `AVASETTLE_PRIVATE_SETTLEMENT_REGISTRY_ADDRESS`).
 
-Contract features:
-- `payInvoice(invoiceId, token, amount, metadata)` — ERC-20 transfer directly to treasury
-- `emergencyWithdraw(token, to, amount)` — owner-only recovery
-- `minAmount` per token — prevents dust attacks
-- `invoicePaid[invoiceId]` guard — prevents double payment
+**PaymentRouter** highlights:
+- `payInvoice(invoiceRef, token, amount, metadata)` → `invoiceId = keccak256(invoiceRef, token, amount)`; the id binds token + amount, so an invoice is consumed only by paying it *exactly* (no underpay / wrong-token invoice-locking)
+- `payInvoiceWithPermit(...)` — EIP-2612: pay in a single tx with no prior `approve`
+- `emergencyWithdraw` (owner-only), `minAmount` per token, `invoicePaid` double-pay guard, `Ownable2Step` handover, `Pausable`, `ReentrancyGuard`
+
+**SettlementVault** highlights: pull-based & non-custodial (funds never rest in the contract), `payout` + atomic `payoutBatch` (≤256), operator/funder role split, per-payout replay guard, attributable `PayoutExecuted` events.
+
+> EVM target is `cancun` (Avalanche C-Chain has the Durango opcodes: MCOPY, transient storage). Only non-rebasing, non-fee-on-transfer tokens may be whitelisted (USDC/USDT qualify).
 
 ---
 

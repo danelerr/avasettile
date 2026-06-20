@@ -20,6 +20,7 @@ import {
   parseAbiItem,
   stringToBytes,
   keccak256,
+  encodeAbiParameters,
 } from 'viem';
 import { mnemonicToAccount } from 'viem/accounts';
 import { avalanche, avalancheFuji } from 'viem/chains';
@@ -72,8 +73,33 @@ export class BlockchainService {
     return this.derivePayInAccount(index).address;
   }
 
+  /**
+   * Derive the per-invoice reference salt the payer passes to
+   * PaymentRouter.payInvoice (the contract binds token + amount on top of it).
+   * Kept stable as keccak256(externalId) so a given invoice always resolves to
+   * the same reference.
+   */
   routerInvoiceIdFromExternalId(externalId: string): `0x${string}` {
     return keccak256(stringToBytes(externalId));
+  }
+
+  /**
+   * Recompute the on-chain invoiceId exactly as PaymentRouter does:
+   *   keccak256(abi.encode(invoiceRef, token, amount))
+   * Used to filter InvoicePaid logs to the one payment that matches this
+   * invoice's reference, token AND exact amount.
+   */
+  computeRouterInvoiceId(
+    invoiceRef: `0x${string}`,
+    token: Address,
+    amountAtomic: bigint,
+  ): `0x${string}` {
+    return keccak256(
+      encodeAbiParameters(
+        [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }],
+        [invoiceRef, token, amountAtomic],
+      ),
+    );
   }
 
   derivePayInAccount(index: number) {
@@ -209,7 +235,8 @@ export class BlockchainService {
 
   async findPaymentRouterInvoicePayments(input: {
     asset: SettlementAsset;
-    invoiceId: `0x${string}`;
+    invoiceRef: `0x${string}`;
+    amountAtomic: bigint;
     fromBlock: bigint;
     toBlock?: bigint;
   }): Promise<PaymentRouterInvoicePayment[]> {
@@ -221,6 +248,14 @@ export class BlockchainService {
     }
 
     const assetConfig = this.requireAsset(input.asset);
+    // The contract binds (reference, token, amount) into the invoiceId, so we
+    // can match the one log for the exact expected payment. Underpayments or
+    // wrong-token payments produce a different invoiceId and are ignored.
+    const invoiceId = this.computeRouterInvoiceId(
+      input.invoiceRef,
+      assetConfig.address,
+      input.amountAtomic,
+    );
     const latestBlock =
       input.toBlock ?? (await this._publicClient.getBlockNumber());
     const fromBlock =
@@ -232,7 +267,7 @@ export class BlockchainService {
     if (fromBlock > latestBlock) return [];
 
     const invoicePaidEvent = parseAbiItem(
-      'event InvoicePaid(bytes32 indexed invoiceId, address indexed payer, address indexed token, uint256 amount, address treasury, bytes metadata)',
+      'event InvoicePaid(bytes32 indexed invoiceId, address indexed payer, address indexed token, bytes32 invoiceRef, uint256 amount, address treasury, bytes metadata)',
     );
 
     type InvoiceLog = {
@@ -243,6 +278,7 @@ export class BlockchainService {
         invoiceId?: `0x${string}`;
         payer?: `0x${string}`;
         token?: `0x${string}`;
+        invoiceRef?: `0x${string}`;
         amount?: bigint;
         treasury?: `0x${string}`;
       };
@@ -256,7 +292,7 @@ export class BlockchainService {
           address: routerAddress,
           event: invoicePaidEvent,
           args: {
-            invoiceId: input.invoiceId,
+            invoiceId,
             token: assetConfig.address,
           },
           fromBlock: from,

@@ -24,7 +24,7 @@
     "demo:router:invoice": "bash scripts/demo/router-invoice.sh",
     "demo:router:deploy-command": "bash scripts/demo/router-deploy-command.sh",
     "demo:reports": "bash scripts/demo/reports.sh",
-    "contracts:build": "forge build",
+    "contracts:build": "forge build --root contracts",
     "db:check": "node -r ts-node/register src/database/check.ts",
     "db:migrate": "node -r ts-node/register src/database/migrate.ts",
     "test": "jest",
@@ -32,7 +32,11 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:integration": "jest --config ./test/jest-integration.json --runInBand"
+    "test:integration": "jest --config ./test/jest-integration.json --runInBand",
+    "contracts:test": "forge test --root contracts",
+    "contracts:fmt": "forge fmt --root contracts",
+    "contracts:fmt:check": "forge fmt --check --root contracts",
+    "contracts:setup": "bash scripts/setup-contracts.sh"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
