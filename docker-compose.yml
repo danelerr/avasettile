@@ -42,6 +42,14 @@ services:
       # and the hosted checkout). Empty until you deploy the contract.
       AVASETTLE_PAYMENT_ROUTER_ADDRESS: ${AVASETTLE_PAYMENT_ROUTER_ADDRESS:-}
       AVASETTLE_CHECKOUT_DEMO_ENABLED: ${AVASETTLE_CHECKOUT_DEMO_ENABLED:-true}
+      # SettlementVault payout rail (atomic single + batch payouts). Empty = direct
+      # treasury transfers. The operator key falls back to the treasury key.
+      AVASETTLE_SETTLEMENT_VAULT_ADDRESS: ${AVASETTLE_SETTLEMENT_VAULT_ADDRESS:-}
+      AVASETTLE_VAULT_OPERATOR_PRIVATE_KEY: ${AVASETTLE_VAULT_OPERATOR_PRIVATE_KEY:-}
+      # Confidential settlements (PrivateSettlementRegistry). Empty = disabled.
+      AVASETTLE_PRIVATE_SETTLEMENT_REGISTRY_ADDRESS: ${AVASETTLE_PRIVATE_SETTLEMENT_REGISTRY_ADDRESS:-}
+      AVASETTLE_SETTLEMENT_REGISTRAR_PRIVATE_KEY: ${AVASETTLE_SETTLEMENT_REGISTRAR_PRIVATE_KEY:-}
+      AVASETTLE_SETTLEMENT_AUDITOR_PRIVATE_KEY: ${AVASETTLE_SETTLEMENT_AUDITOR_PRIVATE_KEY:-}
       AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS: ${AVASETTLE_AUTO_RECONCILE_INTERVAL_SECONDS:-30}
       # ── Secrets (set real values in .env — these defaults are dev-only) ──
       AVASETTLE_ADMIN_API_KEY: ${AVASETTLE_ADMIN_API_KEY:-dev-admin-key-change-me}

@@ -66,6 +66,51 @@ jobs:
       - name: Contract tests
         run: pnpm contracts:test
 
+  landing:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: avasettle-landing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: avasettle-landing/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check (astro check)
+        run: pnpm check
+
+      - name: Build
+        run: pnpm build
+
+  sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check + build SDK
+        run: |
+          pnpm exec tsc --noEmit -p sdk/tsconfig.json
+          pnpm exec tsc -p sdk/tsconfig.json
+
   migrations:
     runs-on: ubuntu-latest
     services:

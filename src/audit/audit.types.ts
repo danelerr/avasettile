@@ -11,7 +11,9 @@ export type AuditEventType =
   | 'PAYIN_SWEPT'
   | 'PAYIN_SWEEP_FAILED'
   | 'PAYIN_ACCEPTED'
-  | 'PAYIN_TOPUP';
+  | 'PAYIN_TOPUP'
+  | 'PRIVATE_SETTLEMENT_RECORDED'
+  | 'PRIVATE_SETTLEMENT_REVEALED';
 
 export type AuditActor = {
   clientId: string | null;

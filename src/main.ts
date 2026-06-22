@@ -85,6 +85,10 @@ async function bootstrap() {
       'checkout',
       'Public hosted-checkout: PaymentRouter invoices anyone can pay from a browser.',
     )
+    .addTag(
+      'settlements',
+      'Confidential settlements: on-chain hash commitments with selective audit disclosure.',
+    )
     .addApiKey(
       {
         type: 'apiKey',

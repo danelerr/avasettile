@@ -25,6 +25,7 @@ import { ClientApiKeyGuard } from '../auth/client-api-key.guard';
 import type { AuthenticatedRequest } from '../auth/client-api-key.guard';
 import { extractRequestContext } from '../common/request-context.util';
 import { AuthorizePayoutDto } from './dto/authorize-payout.dto';
+import { BatchAuthorizePayoutDto } from './dto/batch-authorize-payout.dto';
 import { CreatePayoutDto } from './dto/create-payout.dto';
 import { ListPayoutsQueryDto } from './dto/list-payouts-query.dto';
 import { PayoutsService } from './payouts.service';
@@ -131,6 +132,41 @@ export class PayoutsController {
   })
   getPayout(@Param('id') id: string, @Req() request: AuthenticatedRequest) {
     return this.payouts.getPayout(id, extractRequestContext(request));
+  }
+
+  @Post('batch-authorize')
+  @ApiOperation({
+    summary: 'Authorize a batch of payouts atomically (SettlementVault)',
+    description:
+      'Authorizes many prepared payouts of the same asset and settles them in a single atomic SettlementVault batch — either every leg pays or the whole transaction reverts. Requires AVASETTLE_SETTLEMENT_VAULT_ADDRESS.',
+  })
+  @ApiBody({ type: BatchAuthorizePayoutDto })
+  @ApiOkResponse({
+    description: 'The settled payouts.',
+    schema: {
+      example: [
+        {
+          ...payoutExample,
+          status: 'broadcasted',
+          transactionHash:
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        },
+      ],
+    },
+  })
+  @ApiConflictResponse({
+    description:
+      'A payout is not prepared, assets differ, or treasury balance is insufficient.',
+  })
+  authorizePayoutBatch(
+    @Body() dto: BatchAuthorizePayoutDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.payouts.authorizePayoutBatch(
+      dto.payoutIds,
+      dto,
+      extractRequestContext(request),
+    );
   }
 
   @Post(':id/authorize')

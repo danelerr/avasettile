@@ -22,6 +22,7 @@ import { CheckoutModule } from './checkout/checkout.module';
 import { PayinsModule } from './payins/payins.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { ReportsModule } from './reports/reports.module';
+import { SettlementsModule } from './settlements/settlements.module';
 import { DatabaseModule } from './database/database.module';
 import { StartupModule } from './startup/startup.module';
 import { WebhookModule } from './webhooks/webhook.module';
@@ -43,6 +44,7 @@ import { WebhookModule } from './webhooks/webhook.module';
     CheckoutModule,
     ReconciliationModule,
     ReportsModule,
+    SettlementsModule,
     StartupModule,
   ],
   controllers: [AppController],

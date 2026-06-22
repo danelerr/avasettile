@@ -461,6 +461,27 @@ Steps executed:
 
 Idempotent — returns existing payout if already broadcasted.
 
+**Settlement rail.** When `AVASETTLE_SETTLEMENT_VAULT_ADDRESS` is set, the payout is executed through the on-chain **SettlementVault** instead of a direct treasury transfer: a hot **operator** key calls the vault, which pulls funds from the **funder** treasury (which only ever grants the vault an ERC-20 allowance). This separates the payout-execution key from fund custody. Without the vault configured, payouts use a direct transfer signed by the treasury key. The chosen rail is recorded on the audit event (`rail: "vault" | "direct"`).
+
+---
+
+### `POST /v1/payouts/batch-authorize`
+
+Authorize many prepared payouts of the **same asset** and settle them in a **single atomic SettlementVault batch** — either every leg pays or the whole transaction reverts. Requires `AVASETTLE_SETTLEMENT_VAULT_ADDRESS`.
+
+```json
+{
+  "payoutIds": ["7b4d9f4d-...", "8c5e0a5e-..."],
+  "approvedBy": "ops-team",
+  "notes": "Friday settlement run"
+}
+```
+
+- Each payout is claimed `prepared → authorized` (guarded) before broadcasting, so it can't also be single-authorized concurrently.
+- Validates: all ids exist, share one asset, are `prepared`, and the treasury (funder) holds enough balance. Max 256 per batch.
+- A deterministic batch reference gives on-chain replay protection — re-submitting the same set can never double-pay.
+- Returns the array of settled payouts (`broadcasted`/`confirmed`). On failure the whole batch reverts and every leg is reset (`prepared` for retryable allowance issues, otherwise `failed`).
+
 ---
 
 ### `POST /v1/payouts/:id/reconcile`
@@ -641,6 +662,36 @@ Lists recent webhook delivery attempts. Requires PostgreSQL storage.
   ]
 }
 ```
+
+---
+
+## Confidential settlements
+
+Record an institutional settlement on-chain as a **hash commitment** — the amount and counterparty stay off the public ledger — with **selective disclosure** to a designated auditor. Backed by the `PrivateSettlementRegistry` contract; AvaSettle keeps the preimage so it can be revealed later. Requires `AVASETTLE_PRIVATE_SETTLEMENT_REGISTRY_ADDRESS` (plus a registrar key; reveal needs an auditor key).
+
+> Experimental — the first step of AvaSettle's private-settlement roadmap toward encrypted ERC-20 (eERC). No tokens move here; only a commitment is published.
+
+### `POST /v1/settlements`
+
+```json
+{
+  "externalId": "settlement-2026-001",
+  "asset": "USDC",
+  "amount": "1500.00",
+  "counterparty": "0x1111111111111111111111111111111111111111",
+  "metadata": { "reference": "invoice-887" }
+}
+```
+
+AvaSettle generates a random blinding `nonce`, computes `commitment = keccak256(amount, asset, counterparty, nonce)`, and publishes only the commitment on-chain. The response carries the commitment, `settlementId`, status, and the owner's own data — **never the nonce**. `externalId` is the idempotency key (bound into the on-chain `settlementId`).
+
+### `GET /v1/settlements` · `GET /v1/settlements/:id`
+
+List (newest first, `limit`/`offset`) or fetch the calling client's settlements.
+
+### `POST /v1/settlements/:id/reveal`
+
+The auditor attests on-chain that the record matches its preimage, leaving an immutable disclosure attestation (`status: revealed`). Requires `AVASETTLE_SETTLEMENT_AUDITOR_PRIVATE_KEY`.
 
 ---
 

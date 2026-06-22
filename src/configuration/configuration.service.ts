@@ -175,6 +175,59 @@ export class ConfigurationService {
     return this.readBoolean('AVASETTLE_CHECKOUT_DEMO_ENABLED', true);
   }
 
+  /**
+   * SettlementVault address. When set, payouts route through the vault (operator
+   * key executes, funds pull from the funder treasury) instead of a direct
+   * treasury transfer, and atomic batch payouts become available.
+   */
+  get settlementVaultAddress(): `0x${string}` | null {
+    return this.readAddress('AVASETTLE_SETTLEMENT_VAULT_ADDRESS');
+  }
+
+  get settlementVaultConfigured(): boolean {
+    return this.settlementVaultAddress !== null;
+  }
+
+  /**
+   * Hot signer that executes SettlementVault payouts (must be a registered
+   * operator on the vault). Falls back to the treasury key when unset, but a
+   * separate operator key is the point of the vault — keep the treasury key
+   * cold and only granting an allowance.
+   */
+  get vaultOperatorPrivateKey(): `0x${string}` | null {
+    const raw = process.env.AVASETTLE_VAULT_OPERATOR_PRIVATE_KEY;
+    if (!raw) return null;
+    return raw.startsWith('0x') ? (raw as `0x${string}`) : `0x${raw}`;
+  }
+
+  /**
+   * PrivateSettlementRegistry address. When set, confidential settlements can be
+   * recorded on-chain as hash commitments (amount/counterparty stay private).
+   */
+  get privateSettlementRegistryAddress(): `0x${string}` | null {
+    return this.readAddress('AVASETTLE_PRIVATE_SETTLEMENT_REGISTRY_ADDRESS');
+  }
+
+  get privateSettlementRegistryConfigured(): boolean {
+    return this.privateSettlementRegistryAddress !== null;
+  }
+
+  /** Signer registered as a registrar on the PrivateSettlementRegistry. */
+  get settlementRegistrarPrivateKey(): `0x${string}` | null {
+    return this.readPrivateKey('AVASETTLE_SETTLEMENT_REGISTRAR_PRIVATE_KEY');
+  }
+
+  /** Signer registered as an auditor (reveals commitments on-chain). */
+  get settlementAuditorPrivateKey(): `0x${string}` | null {
+    return this.readPrivateKey('AVASETTLE_SETTLEMENT_AUDITOR_PRIVATE_KEY');
+  }
+
+  private readPrivateKey(name: string): `0x${string}` | null {
+    const raw = process.env[name];
+    if (!raw) return null;
+    return raw.startsWith('0x') ? (raw as `0x${string}`) : `0x${raw}`;
+  }
+
   get webhookRetryAttempts(): number {
     return this.readInt('AVASETTLE_WEBHOOK_RETRY_ATTEMPTS', 3);
   }

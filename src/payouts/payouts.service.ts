@@ -199,11 +199,23 @@ export class PayoutsService {
         );
       }
 
-      const transfer = await this.blockchain.sendErc20Transfer({
-        asset: authorized.asset,
-        to: authorized.beneficiaryAddress,
-        amountAtomic: BigInt(authorized.amountAtomic),
-      });
+      // When a SettlementVault is configured, payouts route through it: the
+      // operator key executes and funds pull from the funder treasury (which
+      // only ever grants an allowance). Otherwise, a direct treasury transfer.
+      const transfer = this.configuration.settlementVaultConfigured
+        ? await this.blockchain.vaultPayout({
+            asset: authorized.asset,
+            payoutRef: this.blockchain.vaultPayoutRefFromExternalId(
+              authorized.externalId,
+            ),
+            to: authorized.beneficiaryAddress,
+            amountAtomic: BigInt(authorized.amountAtomic),
+          })
+        : await this.blockchain.sendErc20Transfer({
+            asset: authorized.asset,
+            to: authorized.beneficiaryAddress,
+            amountAtomic: BigInt(authorized.amountAtomic),
+          });
       const status =
         transfer.status === 'confirmed'
           ? PayoutStatus.Confirmed
@@ -227,7 +239,12 @@ export class PayoutsService {
             : 'PAYOUT_BROADCASTED',
         subjectId: id,
         actor: this.toAuditActor(context, dto.approvedBy),
-        payload: { transactionHash: transfer.hash },
+        payload: {
+          transactionHash: transfer.hash,
+          rail: this.configuration.settlementVaultConfigured
+            ? 'vault'
+            : 'direct',
+        },
       });
 
       if (status === PayoutStatus.Confirmed) {
@@ -271,6 +288,202 @@ export class PayoutsService {
       throw new BadGatewayException({
         message: 'Failed to broadcast payout on Avalanche.',
         payout: await this.toResponse(failed),
+      });
+    }
+  }
+
+  /**
+   * Authorize a set of prepared payouts of the same asset and settle them in a
+   * single atomic SettlementVault batch: either every leg pays or the whole
+   * transaction reverts. Each payout is claimed prepared → authorized first
+   * (so concurrent single-authorize requests can't double-spend), then a
+   * deterministic batchRef gives on-chain replay protection.
+   */
+  async authorizePayoutBatch(
+    payoutIds: string[],
+    dto: AuthorizePayoutDto,
+    context: RequestContext,
+  ): Promise<PayoutResponse[]> {
+    if (!this.configuration.settlementVaultConfigured) {
+      throw new BadRequestException(
+        'Batch payouts require the SettlementVault (set AVASETTLE_SETTLEMENT_VAULT_ADDRESS).',
+      );
+    }
+
+    const ids = [...new Set(payoutIds)];
+    if (ids.length === 0) {
+      throw new BadRequestException('No payout ids provided.');
+    }
+
+    const payouts = await Promise.all(
+      ids.map((id) => this.requirePayout(id, context)),
+    );
+
+    const asset = payouts[0].asset;
+    if (payouts.some((p) => p.asset !== asset)) {
+      throw new BadRequestException(
+        'All payouts in a batch must use the same asset.',
+      );
+    }
+
+    const notPrepared = payouts.filter(
+      (p) => p.status !== PayoutStatus.Prepared,
+    );
+    if (notPrepared.length > 0) {
+      throw new ConflictException(
+        `Payouts must be prepared to batch-authorize: ${notPrepared
+          .map((p) => p.id)
+          .join(', ')} are not.`,
+      );
+    }
+
+    const totalAtomic = payouts.reduce(
+      (sum, p) => sum + BigInt(p.amountAtomic),
+      0n,
+    );
+    const treasuryBalance = await this.blockchain.getAssetBalance(asset);
+    if (BigInt(treasuryBalance.balanceAtomic) < totalAtomic) {
+      throw new ConflictException(
+        `Insufficient treasury ${asset} balance for the batch.`,
+      );
+    }
+
+    // Claim every leg prepared → authorized. If any claim loses a race, roll the
+    // already-claimed legs back so the batch stays all-or-nothing.
+    const now = new Date().toISOString();
+    const claimed: PayoutRecord[] = [];
+    for (const payout of payouts) {
+      const authorized = await this.ledger.update(
+        payout.id,
+        { status: PayoutStatus.Authorized, authorizedAt: now },
+        { expectedStatus: [PayoutStatus.Prepared] },
+      );
+      if (!authorized) {
+        await Promise.all(
+          claimed.map((c) =>
+            this.ledger.update(
+              c.id,
+              { status: PayoutStatus.Prepared },
+              { expectedStatus: [PayoutStatus.Authorized] },
+            ),
+          ),
+        );
+        throw new ConflictException(
+          `Payout ${payout.id} could not be claimed for the batch (concurrent change).`,
+        );
+      }
+      claimed.push(authorized);
+    }
+
+    await Promise.all(
+      claimed.map((c) =>
+        this.audit.record({
+          type: 'PAYOUT_AUTHORIZED',
+          subjectId: c.id,
+          actor: this.toAuditActor(context, dto.approvedBy),
+          payload: {
+            batch: true,
+            riskDecisionId: dto.riskDecisionId ?? null,
+            notes: dto.notes ?? null,
+          },
+        }),
+      ),
+    );
+
+    try {
+      const exec = await this.blockchain.vaultPayoutBatch({
+        asset,
+        batchRef: this.blockchain.batchRefFromExternalIds(
+          claimed.map((c) => c.externalId),
+        ),
+        recipients: claimed.map((c) => c.beneficiaryAddress),
+        amountsAtomic: claimed.map((c) => BigInt(c.amountAtomic)),
+      });
+      const status =
+        exec.status === 'confirmed'
+          ? PayoutStatus.Confirmed
+          : PayoutStatus.Broadcasted;
+
+      const updated = await Promise.all(
+        claimed.map(
+          (c) =>
+            this.ledger.update(
+              c.id,
+              {
+                status,
+                transactionHash: exec.hash,
+                broadcastedAt: now,
+                confirmedAt: status === PayoutStatus.Confirmed ? now : null,
+                failureReason: null,
+              },
+              { expectedStatus: [PayoutStatus.Authorized] },
+            ) as Promise<PayoutRecord>,
+        ),
+      );
+
+      for (const u of updated) {
+        await this.audit.record({
+          type:
+            status === PayoutStatus.Confirmed
+              ? 'PAYOUT_CONFIRMED'
+              : 'PAYOUT_BROADCASTED',
+          subjectId: u.id,
+          actor: this.toAuditActor(context, dto.approvedBy),
+          payload: { transactionHash: exec.hash, rail: 'vault', batch: true },
+        });
+        if (status === PayoutStatus.Confirmed) {
+          await this.webhook.enqueue(u.clientId, 'payout.confirmed', {
+            id: u.id,
+            externalId: u.externalId,
+            asset: u.asset,
+            amount: u.amount,
+            beneficiaryAddress: u.beneficiaryAddress,
+            transactionHash: u.transactionHash,
+            confirmedAt: u.confirmedAt,
+          });
+        }
+      }
+
+      return Promise.all(updated.map((u) => this.toResponse(u)));
+    } catch (error) {
+      // The vault batch is atomic, so on any failure nothing was paid. A
+      // ConflictException (e.g. allowance shortfall) is retryable → back to
+      // prepared; anything else is a hard failure.
+      const retryable = error instanceof ConflictException;
+      const failureReason =
+        error instanceof Error
+          ? error.message
+          : 'Unknown batch broadcast failure.';
+
+      await Promise.all(
+        claimed.map((c) =>
+          this.ledger.update(
+            c.id,
+            {
+              status: retryable ? PayoutStatus.Prepared : PayoutStatus.Failed,
+              failureReason,
+            },
+            { expectedStatus: [PayoutStatus.Authorized] },
+          ),
+        ),
+      );
+
+      if (retryable) throw error;
+
+      await Promise.all(
+        claimed.map((c) =>
+          this.audit.record({
+            type: 'PAYOUT_FAILED',
+            subjectId: c.id,
+            actor: this.toAuditActor(context, dto.approvedBy),
+            payload: { failureReason, batch: true },
+          }),
+        ),
+      );
+
+      throw new BadGatewayException({
+        message: 'Failed to broadcast batch payout on Avalanche.',
+        failureReason,
       });
     }
   }
