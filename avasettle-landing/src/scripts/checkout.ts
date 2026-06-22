@@ -7,6 +7,7 @@ import {
   custom,
   erc20Abi,
   getAddress,
+  parseSignature,
   type Address,
   type Hex,
 } from 'viem';
@@ -30,6 +31,53 @@ const routerAbi = [
       { name: 'metadata', type: 'bytes' },
     ],
     outputs: [{ name: 'invoiceId', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'payInvoiceWithPermit',
+    stateMutability: 'nonpayable',
+    // One-transaction pay: the EIP-2612 permit replaces a separate approve.
+    inputs: [
+      { name: 'invoiceRef', type: 'bytes32' },
+      { name: 'token', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'metadata', type: 'bytes' },
+      { name: 'deadline', type: 'uint256' },
+      { name: 'v', type: 'uint8' },
+      { name: 'r', type: 'bytes32' },
+      { name: 's', type: 'bytes32' },
+    ],
+    outputs: [{ name: 'invoiceId', type: 'bytes32' }],
+  },
+] as const;
+
+// EIP-5267: canonical EIP-712 domain. Reading it avoids guessing the token's
+// permit `version`, which differs across stablecoins (USDC uses "2").
+const eip5267Abi = [
+  {
+    type: 'function',
+    name: 'eip712Domain',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [
+      { name: 'fields', type: 'bytes1' },
+      { name: 'name', type: 'string' },
+      { name: 'version', type: 'string' },
+      { name: 'chainId', type: 'uint256' },
+      { name: 'verifyingContract', type: 'address' },
+      { name: 'salt', type: 'bytes32' },
+      { name: 'extensions', type: 'uint256[]' },
+    ],
+  },
+] as const;
+
+const noncesAbi = [
+  {
+    type: 'function',
+    name: 'nonces',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
   },
 ] as const;
 
@@ -223,6 +271,60 @@ async function ensureChain(eth: Ethereum, chainId: number): Promise<void> {
   }
 }
 
+type WalletClient = ReturnType<typeof createWalletClient>;
+type ReadClient = ReturnType<typeof createPublicClient>;
+
+/**
+ * Best-effort EIP-2612 permit so the payer signs once and pays in a single
+ * transaction (no separate approve). Reads the token's canonical EIP-712 domain
+ * (EIP-5267) to avoid guessing the permit `version`. Returns null if anything
+ * is unavailable — the caller then falls back to approve + payInvoice, so this
+ * never blocks a payment.
+ */
+async function tryPermitSignature(
+  readClient: ReadClient,
+  walletClient: WalletClient,
+  account: Address,
+  token: Address,
+  spender: Address,
+  amount: bigint,
+): Promise<{ deadline: bigint; v: number; r: Hex; s: Hex } | null> {
+  try {
+    const [, name, version, , verifyingContract] = await readClient.readContract({
+      address: token,
+      abi: eip5267Abi,
+      functionName: 'eip712Domain',
+    });
+    const nonce = await readClient.readContract({
+      address: token,
+      abi: noncesAbi,
+      functionName: 'nonces',
+      args: [account],
+    });
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+    const signature = await walletClient.signTypedData({
+      account,
+      domain: { name, version, chainId: config.chainId, verifyingContract },
+      types: {
+        Permit: [
+          { name: 'owner', type: 'address' },
+          { name: 'spender', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      },
+      primaryType: 'Permit',
+      message: { owner: account, spender, value: amount, nonce, deadline },
+    });
+    const { r, s, v } = parseSignature(signature);
+    if (v === undefined) return null;
+    return { deadline, v: Number(v), r, s };
+  } catch {
+    return null;
+  }
+}
+
 async function pay(): Promise<void> {
   const eth = getEthereum();
   if (!eth) {
@@ -253,36 +355,71 @@ async function pay(): Promise<void> {
     const token = getAddress(session.tokenAddress);
     const amount = BigInt(session.amountAtomic);
 
-    const allowance = await publicClient.readContract({
-      address: token,
-      abi: erc20Abi,
-      functionName: 'allowance',
-      args: [account, router],
-    });
+    const invoiceRef = session.invoiceId;
 
-    if (allowance < amount) {
-      note(`Aprueba ${session.amount} ${session.asset} en tu wallet…`);
-      const approveHash = await walletClient.writeContract({
+    // Prefer a single-transaction pay via EIP-2612 permit; fall back to the
+    // classic approve + payInvoice when the token doesn't support permit.
+    note('Prepara el pago en tu wallet…');
+    const permit = await tryPermitSignature(
+      publicClient,
+      walletClient,
+      account,
+      token,
+      router,
+      amount,
+    );
+
+    let payHash: Hex;
+    if (permit) {
+      note(`Confirma el pago de ${session.amount} ${session.asset} en tu wallet…`);
+      payHash = await walletClient.writeContract({
         account,
         chain,
+        address: router,
+        abi: routerAbi,
+        functionName: 'payInvoiceWithPermit',
+        args: [
+          invoiceRef,
+          token,
+          amount,
+          '0x',
+          permit.deadline,
+          permit.v,
+          permit.r,
+          permit.s,
+        ],
+      });
+    } else {
+      const allowance = await publicClient.readContract({
         address: token,
         abi: erc20Abi,
-        functionName: 'approve',
-        args: [router, amount],
+        functionName: 'allowance',
+        args: [account, router],
       });
-      note('Esperando la aprobación on-chain…');
-      await publicClient.waitForTransactionReceipt({ hash: approveHash });
-    }
+      if (allowance < amount) {
+        note(`Aprueba ${session.amount} ${session.asset} en tu wallet…`);
+        const approveHash = await walletClient.writeContract({
+          account,
+          chain,
+          address: token,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [router, amount],
+        });
+        note('Esperando la aprobación on-chain…');
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      }
 
-    note(`Confirma el pago de ${session.amount} ${session.asset} en tu wallet…`);
-    const payHash = await walletClient.writeContract({
-      account,
-      chain,
-      address: router,
-      abi: routerAbi,
-      functionName: 'payInvoice',
-      args: [session.invoiceId, token, amount, '0x'],
-    });
+      note(`Confirma el pago de ${session.amount} ${session.asset} en tu wallet…`);
+      payHash = await walletClient.writeContract({
+        account,
+        chain,
+        address: router,
+        abi: routerAbi,
+        functionName: 'payInvoice',
+        args: [invoiceRef, token, amount, '0x'],
+      });
+    }
 
     paidLocally = true;
     renderStatus(session, paidLocally);

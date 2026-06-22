@@ -35,7 +35,7 @@ import logo from '../assets/avasettle-mark.png';
     Redoc.init(
       '/openapi.json',
       {
-        scrollYOffset: '#topbar',
+        scrollYOffset: 60,
         hideDownloadButton: false,
         expandResponses: '200,201',
         jsonSampleExpandLevel: 2,
@@ -92,6 +92,13 @@ import logo from '../assets/avasettle-mark.png';
 </Layout>
 
 <style>
+  /* Redoc drives navigation with its own JS scroll; the global
+     `scroll-behavior: smooth` fights it and the content never moves. Force
+     instant scroll on this page so clicking an endpoint jumps to it. */
+  :global(html) {
+    scroll-behavior: auto !important;
+  }
+
   body {
     background: var(--white);
   }
